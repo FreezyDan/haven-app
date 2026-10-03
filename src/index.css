@@ -1,0 +1,71 @@
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..700;1,9..144,400..700&family=Inter:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 60 9% 95%;
+    --foreground: 156 16% 16%;
+    --card: 0 0% 100%;
+    --card-foreground: 156 16% 16%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 156 16% 16%;
+    --primary: 155 46% 34%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 144 32% 92%;
+    --secondary-foreground: 155 46% 34%;
+    --muted: 60 6% 93%;
+    --muted-foreground: 150 6% 44%;
+    --accent: 144 32% 92%;
+    --accent-foreground: 155 46% 34%;
+    --destructive: 4 53% 42%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 60 6% 89%;
+    --input: 60 6% 89%;
+    --ring: 155 46% 34%;
+    --radius: 0.625rem;
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-primary: 240 5.9% 10%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 240 4.8% 95.9%;
+    --sidebar-accent-foreground: 240 5.9% 10%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html {
+    @apply antialiased;
+  }
+  body {
+    @apply bg-haven-canvas text-haven-text font-sans;
+  }
+  ::selection {
+    background: #6E6CF033;
+  }
+}
+
+@layer utilities {
+  .scrollbar-calm::-webkit-scrollbar {
+    width: 8px;
+  }
+  .scrollbar-calm::-webkit-scrollbar-thumb {
+    background: #d8d8d0;
+    border-radius: 999px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
