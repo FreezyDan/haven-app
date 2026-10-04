@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Bookmark, Flag, HeartHandshake, Info, MessageCircle, MoreHorizontal, ShieldBan, Trash2, X } from 'lucide-react';
+import { Bookmark, Flag, ImagePlus, Info, MessageCircle, MoreHorizontal, ShieldBan, Trash2, X } from 'lucide-react';
+import HugIcon from '@/components/HugIcon';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
@@ -12,6 +13,7 @@ export interface Post {
   moodChip?: { label: string; bg: string; text: string };
   title: string;
   body: string;
+  image?: string;
   hugs: number;
   replies: number;
 }
@@ -20,9 +22,24 @@ interface PostCardProps {
   post: Post;
   index?: number;
   onDelete?: (id: string) => void;
+  onUpdate?: (id: string, patch: Partial<Post>) => void;
 }
 
-export default function PostCard({ post, index = 0, onDelete }: PostCardProps) {
+export function readImageFile(file: File, onDone: (dataUrl: string) => void) {
+  if (!/^image\//.test(file.type)) {
+    toast('That file is not an image — pick a photo or GIF.');
+    return;
+  }
+  if (file.size > 2_000_000) {
+    toast('That file is a bit large — try one under 2MB.');
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = () => onDone(String(reader.result));
+  reader.readAsDataURL(file);
+}
+
+export default function PostCard({ post, index = 0, onDelete, onUpdate }: PostCardProps) {
   const [hugged, setHugged] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -66,6 +83,23 @@ export default function PostCard({ post, index = 0, onDelete }: PostCardProps) {
     }
   });
   const [expanded, setExpanded] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const isOwnPost = post.id.startsWith('user-');
+
+  const pickImage = () => {
+    setMenuOpen(false);
+    fileInputRef.current?.click();
+  };
+
+  const onImageChosen = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    readImageFile(file, (dataUrl) => {
+      onUpdate?.(post.id, { image: dataUrl });
+      toast('Photo added to your post.');
+    });
+  };
 
   const toggleHug = () => {
     setHugged((h) => !h);
@@ -160,6 +194,17 @@ export default function PostCard({ post, index = 0, onDelete }: PostCardProps) {
                     {item.label}
                   </button>
                 ))}
+                {isOwnPost && onUpdate && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={pickImage}
+                    className="flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm text-haven-text transition-colors hover:bg-haven-canvas"
+                  >
+                    <ImagePlus size={15} strokeWidth={1.75} />
+                    Add photo/GIF
+                  </button>
+                )}
               </motion.div>
             )}
           </AnimatePresence>
@@ -187,12 +232,40 @@ export default function PostCard({ post, index = 0, onDelete }: PostCardProps) {
         )}
       </div>
 
+      {post.image && (
+        <div className="group relative mt-3">
+          <img
+            src={post.image}
+            alt="Attached to this post"
+            className="max-h-72 w-full rounded-xl border border-haven-border object-cover"
+          />
+          {isOwnPost && onUpdate && (
+            <button
+              type="button"
+              onClick={() => onUpdate(post.id, { image: undefined })}
+              aria-label="Remove photo"
+              className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full bg-white/90 text-haven-text opacity-0 shadow-card transition-opacity hover:text-haven-danger group-hover:opacity-100"
+            >
+              <X size={14} strokeWidth={2} />
+            </button>
+          )}
+        </div>
+      )}
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*,.gif"
+        className="hidden"
+        onChange={onImageChosen}
+      />
+
       <div className="mt-4 flex items-center gap-5 border-t border-haven-border pt-3">
         <button
           type="button"
           onClick={toggleHug}
           aria-pressed={hugged}
-          className="group relative flex items-center gap-1.5 text-[13px] font-medium text-haven-text-muted transition-colors hover:text-[#C0453B]"
+          className="group relative flex items-center gap-1.5 text-[13px] font-medium text-haven-text-muted transition-colors hover:text-[#8786FF]"
         >
           <span className="relative">
             <motion.span
@@ -202,16 +275,16 @@ export default function PostCard({ post, index = 0, onDelete }: PostCardProps) {
               transition={{ duration: 0.45, type: 'spring', stiffness: 320, damping: 14 }}
               className="block"
             >
-              <HeartHandshake
+              <HugIcon
                 size={18}
                 strokeWidth={1.75}
-                className={cn(hugged && 'fill-[#C0453B] text-[#C0453B]')}
+                className={cn(hugged && 'fill-[#8786FF] text-[#8786FF]')}
               />
             </motion.span>
             {hugBurst > 0 && (
               <motion.span
                 key={`ring-${hugBurst}`}
-                className="pointer-events-none absolute inset-0 rounded-full border-2 border-[#C0453B]/50"
+                className="pointer-events-none absolute inset-0 rounded-full border-2 border-[#8786FF]/50"
                 initial={{ scale: 1, opacity: 0.8 }}
                 animate={{ scale: 2.1, opacity: 0 }}
                 transition={{ duration: 0.45, ease: 'easeOut' }}

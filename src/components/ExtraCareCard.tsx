@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { HeartHandshake, X } from 'lucide-react';
+import { X } from 'lucide-react';
+import HugIcon from '@/components/HugIcon';
 import { todayKey } from '@/lib/moodStore';
 
 const DISMISS_KEY = 'haven.dismissedCareCardDate';
@@ -51,7 +52,7 @@ export default function ExtraCareCard({ onOpenCrisis, onDismiss }: ExtraCareCard
       <div className="relative">
         <div className="flex items-center gap-2">
           <span className="flex h-9 w-9 items-center justify-center rounded-full bg-white/70 text-haven-primary">
-            <HeartHandshake size={20} strokeWidth={1.75} />
+            <HugIcon size={20} strokeWidth={1.75} />
           </span>
           <span className="text-xs font-medium uppercase tracking-[0.08em] text-haven-text-muted">
             A little extra care
