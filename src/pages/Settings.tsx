@@ -449,7 +449,7 @@ export default function Settings() {
             You haven't blocked anyone — we hope it stays that way. If someone ever makes this space feel unsafe, you can block them from any post or chat, and our moderators review every report with care.
           </p>
           <div className="mt-4 rounded-xl bg-[#FBF3DD] p-3 text-[13px] text-[#8A6B1F]">
-            Haven is a peer-support community, not a replacement for professional care.
+            Haven is a peer-support space, not a replacement for professional care.
           </div>
           <button
             type="button"
@@ -463,7 +463,7 @@ export default function Settings() {
 
       {showEdit && (
         <Modal title="Edit profile" onClose={() => setShowEdit(false)}>
-          <p className="mt-2 text-[13px] text-[#6E6E88]">Your gentle pseudonym is how the community knows you.</p>
+          <p className="mt-2 text-[13px] text-[#6E6E88]">Your gentle pseudonym is how others know you.</p>
           <label className="mt-4 block text-sm font-semibold text-[#23223A]">
             Pseudonym
             <input
