@@ -5,7 +5,6 @@ import {
   Bell,
   Download,
   EyeOff,
-  HeartHandshake,
   Lock,
   MessageSquareWarning,
   Moon,
@@ -17,6 +16,7 @@ import {
   Wind,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
+import HugIcon from '@/components/HugIcon'
 import { useHavenUi } from '@/components/Layout'
 import { cn } from '@/lib/utils'
 
@@ -107,7 +107,7 @@ function Toggle({ on, onChange, label }: { on: boolean; onChange: () => void; la
 }
 
 interface ToggleRowProps {
-  icon: LucideIcon
+  icon: LucideIcon | typeof HugIcon
   label: string
   description: string
   on: boolean
@@ -384,7 +384,7 @@ export default function Settings() {
         />
         <div className="border-t border-[#E7E7F0]" />
         <ToggleRow
-          icon={HeartHandshake}
+          icon={HugIcon}
           label="Extra-care outreach"
           description="When you've had several hard days in a row, Haven will gently suggest support resources. You can turn this off at any time — it's always your choice."
           on={settings.extraCareOutreach}
