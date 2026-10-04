@@ -8,7 +8,7 @@ export default function Topbar() {
   const showStreak = pathname.startsWith('/mood') || pathname.startsWith('/journal');
 
   return (
-    <header className="sticky top-0 z-40 flex items-center gap-4 border-b border-haven-border/70 bg-haven-canvas/90 px-8 py-4 backdrop-blur">
+    <header className="sticky top-0 z-40 flex items-center gap-4 border-b border-haven-border bg-[#EEEEFC]/95 px-8 py-4 backdrop-blur">
       <Link to="/" className="flex flex-1 items-center gap-2.5" aria-label="Haven home">
         <img src="/logo.svg" alt="" className="h-7 w-7 rounded-lg" />
         <span className="font-serif text-[24px] font-semibold tracking-[-0.01em] text-haven-text">

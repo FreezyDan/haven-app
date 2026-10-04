@@ -64,7 +64,7 @@ export default function Layout() {
             </main>
             <aside className="sticky top-[73px] hidden w-80 shrink-0 self-start px-6 py-8 xl:block">
               <h2 className="mb-4 font-serif text-lg font-semibold text-haven-text">
-                Daily inspiration
+                Something good for you…
               </h2>
               <div className="space-y-4">
                 {ARTICLES.slice(0, 4).map((a, i) => (
