@@ -87,9 +87,24 @@ export default function Home() {
   const [chip, setChip] = useState<string | null>(null);
   const [justShared, setJustShared] = useState(false);
   const [userPosts, setUserPosts] = useState<Post[]>(loadUserPosts);
+  const [hiddenPostIds, setHiddenPostIds] = useState<string[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const posts = useMemo(() => [...userPosts, ...SEED_POSTS], [userPosts]);
+  const posts = useMemo(
+    () => [...userPosts, ...SEED_POSTS].filter((p) => !hiddenPostIds.includes(p.id)),
+    [userPosts, hiddenPostIds],
+  );
+
+  const deletePost = (id: string) => {
+    setHiddenPostIds((prev) => [...prev, id]);
+    setUserPosts((prev) => {
+      const next = prev.filter((p) => p.id !== id);
+      if (next.length !== prev.length) {
+        localStorage.setItem(USER_POSTS_KEY, JSON.stringify(next));
+      }
+      return next;
+    });
+  };
 
   const dismissBanner = () => {
     sessionStorage.setItem(BANNER_KEY, '1');
@@ -127,7 +142,7 @@ export default function Home() {
     setChip(null);
     setJustShared(true);
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
-    window.setTimeout(() => setJustShared(false), 1200);
+    window.setTimeout(() => setJustShared(false), 2600);
   };
 
   return (
@@ -250,9 +265,15 @@ export default function Home() {
               setText(e.target.value);
               autoGrow();
             }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                share();
+              }
+            }}
             rows={2}
             placeholder="How are you feeling today? It's okay to not be okay…"
-            className="w-full resize-none rounded-xl border border-transparent bg-transparent p-2 text-[15px] leading-relaxed text-haven-text transition-colors duration-200 placeholder:text-haven-text-muted/70 focus:border-haven-primary focus:outline-none"
+            className="w-full resize-none rounded-xl border border-haven-border bg-haven-canvas px-3 py-2 text-[15px] leading-relaxed text-haven-text transition-colors duration-200 placeholder:text-haven-text-muted/70 focus:outline-none focus:ring-2 focus:ring-haven-primary/40"
           />
         </div>
         <div className="mt-3 flex flex-wrap items-center gap-2 pl-[52px]">
@@ -277,34 +298,28 @@ export default function Home() {
               </button>
             );
           })}
-          <button
-            type="button"
-            onClick={share}
-            disabled={!text.trim()}
-            className={cn(
-              'ml-auto flex items-center gap-1.5 rounded-full px-5 py-2 text-sm font-semibold text-white transition-all duration-200 ease-soft',
-              text.trim()
-                ? 'bg-haven-primary hover:scale-[1.02] hover:bg-haven-primary-hover'
-                : 'cursor-not-allowed bg-haven-text-muted/40',
-            )}
-          >
-            {justShared ? (
-              <>
-                <Check size={16} strokeWidth={2} /> Shared
-              </>
-            ) : (
-              'Share'
-            )}
-          </button>
         </div>
+        <AnimatePresence>
+          {justShared && (
+            <motion.p
+              initial={{ opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+              className="mt-2 flex items-center gap-1.5 pl-[52px] text-[13px] font-medium text-haven-primary"
+            >
+              <Check size={14} strokeWidth={2} /> Shared — thank you for letting it out.
+            </motion.p>
+          )}
+        </AnimatePresence>
         <p className="mt-2 pl-[52px] text-[13px] text-haven-text-muted">
-          Posts are anonymous to the community by default.
+          Posts are anonymous by default. Press Enter to share, Shift+Enter for a new line.
         </p>
       </motion.section>
 
-      {/* 5. Community feed */}
+      {/* 5. Feed */}
       <p className="mb-4 text-[13px] font-bold uppercase tracking-[0.08em] text-haven-text-muted">
-        Community feed
+        Feed
       </p>
       {posts.length === 0 ? (
         <div className="flex flex-col items-center rounded-2xl border border-haven-border bg-white px-6 py-12 text-center shadow-card">
@@ -319,7 +334,7 @@ export default function Home() {
       ) : (
         <div className="space-y-6 pb-12">
           {posts.map((post, i) => (
-            <PostCard key={post.id} post={post} index={Math.min(i, 8)} />
+            <PostCard key={post.id} post={post} index={Math.min(i, 8)} onDelete={deletePost} />
           ))}
         </div>
       )}

@@ -213,7 +213,7 @@ export default function Profile() {
           </div>
           <h1 className="mt-3 text-[22px] font-semibold text-haven-text">{profile.name}</h1>
           <p className="text-[13px] text-haven-text-muted">
-            also known as <span className="italic">{profile.pseudonym}</span> in the community
+            also known as <span className="italic">{profile.pseudonym}</span>
           </p>
           <p className="mt-2 line-clamp-2 text-sm leading-[1.6] text-haven-text/90">
             {profile.bio}
@@ -241,7 +241,7 @@ export default function Profile() {
           ))}
         </div>
         <p className="mt-3 text-center text-[13px] text-haven-text-muted">
-          These numbers are just for you. There's no audience here — only community.
+          These numbers are just for you — a quiet record of you showing up.
         </p>
       </section>
 
@@ -436,7 +436,7 @@ export default function Profile() {
               </label>
               <label className="mt-4 block">
                 <span className="text-xs font-medium uppercase tracking-[0.08em] text-haven-text-muted">
-                  Community pseudonym
+                  Pseudonym
                 </span>
                 <input
                   value={draft.pseudonym}
