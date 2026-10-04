@@ -169,13 +169,13 @@ export default function Home() {
       )}
 
       {/* 3. Today's check-in strip */}
+      <h2 className="mb-3 text-[20px] font-bold text-haven-text">Daily check in</h2>
       <motion.section
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.35, delay: 0.2, ease: [0.22, 1, 0.36, 1] }}
         className="mb-6 rounded-2xl border border-haven-border bg-white p-5 shadow-card"
       >
-        <h2 className="mb-3 text-[16px] font-semibold text-haven-text">Daily check in</h2>
         {todayMeta ? (
           <div className="flex items-center justify-between gap-3">
             <p className="text-[15px] text-haven-text">
@@ -232,13 +232,13 @@ export default function Home() {
       </motion.section>
 
       {/* 4. Composer */}
+      <h2 className="mb-3 text-[20px] font-bold text-haven-text">Let it out</h2>
       <motion.section
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.35, delay: 0.3, ease: [0.22, 1, 0.36, 1] }}
         className="mb-8 rounded-2xl border border-haven-border bg-white p-5 shadow-card transition-shadow duration-200 focus-within:shadow-card-hover"
       >
-        <h2 className="mb-3 text-[16px] font-semibold text-haven-text">Let it out</h2>
         <div className="flex gap-3">
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#8B7BC7] text-sm font-semibold text-white">
             M
