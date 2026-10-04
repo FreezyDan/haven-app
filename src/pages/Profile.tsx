@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Link } from 'react-router';
-import { BookOpen, CalendarCheck, Heart, HeartHandshake, Lock, ShieldCheck, Star, X } from 'lucide-react';
+import { BookOpen, CalendarCheck, Heart, Lock, ShieldCheck, Star, X } from 'lucide-react';
+import HugIcon from '@/components/HugIcon';
 import PostCard, { type Post } from '@/components/PostCard';
 import MoodChip from '@/components/MoodChip';
 import {
@@ -164,7 +165,7 @@ export default function Profile() {
   const stats = [
     { label: 'Days journaled', value: journalEntries.length, icon: BookOpen, color: '#6E6CF0' },
     { label: 'Hugs received', value: hugStats.received, icon: Heart, color: '#C0453B' },
-    { label: 'Hugs given', value: hugStats.given, icon: HeartHandshake, color: '#6E6CF0' },
+    { label: 'Hugs given', value: hugStats.given, icon: HugIcon, color: '#6E6CF0' },
     { label: 'Check-ins this month', value: checkInsThisMonth, icon: CalendarCheck, color: '#6E6CF0' },
   ];
 

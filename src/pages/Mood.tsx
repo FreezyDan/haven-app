@@ -87,12 +87,6 @@ export default function Mood() {
   const quote = REFLECTION_QUOTES[new Date().getDate() % REFLECTION_QUOTES.length];
 
   const handleSelectDay = (dateKey: string) => {
-    const entry = entries[dateKey];
-    if (!entry && dateKey < today) {
-      // Backfill a past day via the shared check-in modal
-      openCheckIn({ date: dateKey });
-      return;
-    }
     if (dateKey > today) return; // future days are non-interactive
     setSelectedDay((cur) => (cur === dateKey ? null : dateKey));
   };
