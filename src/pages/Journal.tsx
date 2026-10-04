@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Link } from 'react-router';
-import { Lock, PenLine, ShieldCheck, Sparkles, Sprout, Star, Trash2, X } from 'lucide-react';
+import { Lock, PenLine, ShieldCheck, Sprout, Star, Trash2, X } from 'lucide-react';
+import AudioJournal from '@/components/AudioJournal';
 import MoodCalendar from '@/components/MoodCalendar';
 import MoodChip from '@/components/MoodChip';
 import ExtraCareCard, { isCareCardDismissedToday } from '@/components/ExtraCareCard';
@@ -23,11 +24,6 @@ import {
   type JournalEntry,
 } from '@/components/wellness/journalStore';
 import { cn } from '@/lib/utils';
-
-const TEMPLATE_INSERTS: Record<string, string> = {
-  'Daily check-in': 'Today I feel… because…',
-  Gratitude: "Three small things I'm grateful for:\n1. \n2. \n3. ",
-};
 
 function trendLine(): string {
   const stats = getMoodStats(30);
@@ -134,6 +130,7 @@ export default function Journal() {
       )}
 
       {/* 3. Composer */}
+      <h2 className="text-[20px] font-bold text-haven-text">Write for yourself</h2>
       <motion.section
         initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
@@ -144,31 +141,12 @@ export default function Journal() {
           id="journal-composer"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          rows={4}
+          rows={10}
           placeholder="Write freely in your journal… there's no wrong way to feel."
-          className="w-full resize-none rounded-xl border border-haven-border bg-haven-canvas p-4 text-sm leading-relaxed text-haven-text placeholder:text-haven-text-muted/70 focus:outline-none focus:ring-2 focus:ring-haven-primary/40"
+          className="min-h-[240px] w-full resize-y rounded-xl border border-haven-border bg-haven-canvas p-4 text-[15px] leading-relaxed text-haven-text placeholder:text-haven-text-muted/70 focus:outline-none focus:ring-2 focus:ring-haven-primary/40"
         />
 
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          {Object.keys(TEMPLATE_INSERTS).map((chip) => (
-            <button
-              key={chip}
-              type="button"
-              onClick={() => setDraft((d) => (d ? `${d}\n${TEMPLATE_INSERTS[chip]}` : TEMPLATE_INSERTS[chip]))}
-              className="rounded-full border border-haven-border bg-white px-3 py-1 text-xs font-medium text-haven-text-muted transition-colors hover:border-haven-primary/40 hover:text-haven-primary"
-            >
-              {chip}
-            </button>
-          ))}
-          <button
-            type="button"
-            onClick={() => openCheckIn()}
-            className="flex items-center gap-1.5 rounded-full border border-haven-border bg-white px-3 py-1 text-xs font-medium text-haven-text-muted transition-colors hover:border-haven-primary/40 hover:text-haven-primary"
-          >
-            <Sparkles size={13} strokeWidth={1.75} />
-            Mood tracker
-          </button>
-        </div>
+        <AudioJournal />
 
         <div className="mt-4 flex flex-wrap items-center gap-2">
           <span className="text-xs font-medium uppercase tracking-[0.08em] text-haven-text-muted">

@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Check, Leaf, X } from 'lucide-react';
-import PostCard, { type Post } from '@/components/PostCard';
+import { Check, ImagePlus, Leaf, X } from 'lucide-react';
+import PostCard, { readImageFile, type Post } from '@/components/PostCard';
 import ExtraCareCard, { isCareCardDismissedToday } from '@/components/ExtraCareCard';
 import { useHavenUi } from '@/components/Layout';
 import { MOODS, moodMeta, needsExtraCare, useMoodEntries, useMoodToday, type MoodValue } from '@/lib/moodStore';
@@ -89,6 +89,27 @@ export default function Home() {
   const [userPosts, setUserPosts] = useState<Post[]>(loadUserPosts);
   const [hiddenPostIds, setHiddenPostIds] = useState<string[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [draftImage, setDraftImage] = useState<string | null>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+
+  const pickDraftImage = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    readImageFile(file, (dataUrl) => setDraftImage(dataUrl));
+  };
+
+  const updatePost = (id: string, patch: Partial<Post>) => {
+    setUserPosts((prev) => {
+      const next = prev.map((p) => (p.id === id ? { ...p, ...patch } : p));
+      try {
+        localStorage.setItem(USER_POSTS_KEY, JSON.stringify(next));
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  };
 
   const posts = useMemo(
     () => [...userPosts, ...SEED_POSTS].filter((p) => !hiddenPostIds.includes(p.id)),
@@ -120,7 +141,7 @@ export default function Home() {
 
   const share = () => {
     const body = text.trim();
-    if (!body) return;
+    if (!body && !draftImage) return;
     const chipDef = COMPOSER_MOODS.find((c) => c.label === chip);
     const meta = chipDef ? moodMeta(chipDef.mood) : null;
     const firstLine = body.split('\n')[0];
@@ -130,16 +151,22 @@ export default function Home() {
       avatarColor: '#7FA8C9',
       time: 'now',
       moodChip: chip && meta ? { label: chip, bg: meta.chipBg, text: meta.chipText } : undefined,
-      title: firstLine.length > 60 ? `${firstLine.slice(0, 60)}…` : firstLine,
+      title: firstLine.length > 60 ? `${firstLine.slice(0, 60)}…` : firstLine || 'A quiet share',
       body,
+      ...(draftImage ? { image: draftImage } : {}),
       hugs: 0,
       replies: 0,
     };
     const next = [post, ...userPosts];
     setUserPosts(next);
-    localStorage.setItem(USER_POSTS_KEY, JSON.stringify(next));
+    try {
+      localStorage.setItem(USER_POSTS_KEY, JSON.stringify(next));
+    } catch {
+      /* image too large to persist — post stays for this session */
+    }
     setText('');
     setChip(null);
+    setDraftImage(null);
     setJustShared(true);
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
     window.setTimeout(() => setJustShared(false), 2600);
@@ -298,7 +325,49 @@ export default function Home() {
               </button>
             );
           })}
+          <button
+            type="button"
+            onClick={() => imageInputRef.current?.click()}
+            aria-label="Add a photo or GIF"
+            title="Add a photo or GIF"
+            className="flex items-center gap-1.5 rounded-full border border-haven-border bg-white px-3 py-1 text-[13px] font-medium text-haven-text-muted transition-all duration-200 ease-soft hover:border-haven-primary/40 hover:text-haven-primary"
+          >
+            <ImagePlus size={14} strokeWidth={1.75} />
+            Photo/GIF
+          </button>
+          <input
+            ref={imageInputRef}
+            type="file"
+            accept="image/*,.gif"
+            className="hidden"
+            onChange={pickDraftImage}
+          />
         </div>
+        <AnimatePresence>
+          {draftImage && (
+            <motion.div
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 6 }}
+              transition={{ duration: 0.25 }}
+              className="relative ml-[52px] mt-3 w-fit"
+            >
+              <img
+                src={draftImage}
+                alt="Attached preview"
+                className="max-h-40 rounded-xl border border-haven-border object-cover"
+              />
+              <button
+                type="button"
+                onClick={() => setDraftImage(null)}
+                aria-label="Remove attachment"
+                className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-white text-haven-text shadow-card transition-colors hover:text-haven-danger"
+              >
+                <X size={13} strokeWidth={2} />
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
         <AnimatePresence>
           {justShared && (
             <motion.p
@@ -334,7 +403,13 @@ export default function Home() {
       ) : (
         <div className="space-y-6 pb-12">
           {posts.map((post, i) => (
-            <PostCard key={post.id} post={post} index={Math.min(i, 8)} onDelete={deletePost} />
+            <PostCard
+              key={post.id}
+              post={post}
+              index={Math.min(i, 8)}
+              onDelete={deletePost}
+              onUpdate={updatePost}
+            />
           ))}
         </div>
       )}
