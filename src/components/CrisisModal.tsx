@@ -179,6 +179,10 @@ export default function CrisisModal({ open, onOpenChange, fromCareCard = false }
                     Outside the US? Find international helplines
                     <ExternalLink size={14} strokeWidth={1.75} />
                   </a>
+                  <p className="rounded-lg bg-haven-canvas px-3 py-2 text-center text-[11px] leading-relaxed text-haven-text-muted/80">
+                    Placeholder contacts (US) — to be replaced with region-appropriate helplines
+                    before launch.
+                  </p>
 
                   <div className="flex items-center gap-3 py-1">
                     <span className="h-px flex-1 bg-haven-border" />
