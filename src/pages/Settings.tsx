@@ -36,6 +36,7 @@ interface HavenSettings {
   quietEnd: string
   weeklySummary: boolean
   extraCareOutreach: boolean
+  inspireSection: boolean
 }
 
 const DEFAULTS: HavenSettings = {
@@ -50,6 +51,7 @@ const DEFAULTS: HavenSettings = {
   quietEnd: '08:00',
   weeklySummary: true,
   extraCareOutreach: true,
+  inspireSection: true,
 }
 
 function loadSettings(): HavenSettings {
@@ -389,6 +391,14 @@ export default function Settings() {
           description="When you've had several hard days in a row, Haven will gently suggest support resources. You can turn this off at any time — it's always your choice."
           on={settings.extraCareOutreach}
           onToggle={() => update('extraCareOutreach', !settings.extraCareOutreach)}
+        />
+        <div className="border-t border-[#E7E7F0]" />
+        <ToggleRow
+          icon={Sparkles}
+          label="Gentle inspiration on Home"
+          description="The optional stories, quotes, and small ideas at the top of Home. Turn this off for a completely plain Home — no judgment either way."
+          on={settings.inspireSection}
+          onToggle={() => update('inspireSection', !settings.inspireSection)}
         />
       </SectionCard>
 

@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Link } from 'react-router';
-import { BookOpen, CalendarCheck, Heart, Lock, ShieldCheck, Star, X } from 'lucide-react';
+import { BookOpen, CalendarCheck, Check, Heart, ImagePlus, Lock, ShieldCheck, Star, X } from 'lucide-react';
 import HugIcon from '@/components/HugIcon';
-import PostCard, { type Post } from '@/components/PostCard';
+import PostCard, { readImageFile, type Post } from '@/components/PostCard';
 import MoodChip from '@/components/MoodChip';
 import {
   moodMeta,
@@ -11,6 +11,7 @@ import {
   useMoodEntries,
   useMoodStreak,
   useNeedsExtraCare,
+  type MoodValue,
 } from '@/lib/moodStore';
 import { formatEntryDate, loadJournalEntries } from '@/components/wellness/journalStore';
 import { cn } from '@/lib/utils';
@@ -129,6 +130,13 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'highlights', label: 'Journal highlights' },
 ];
 
+const COMPOSER_MOODS: { label: string; mood: MoodValue }[] = [
+  { label: 'Feeling heavy', mood: 'struggling' },
+  { label: 'Anxious', mood: 'low' },
+  { label: 'Hopeful', mood: 'good' },
+  { label: 'Calm', mood: 'okay' },
+];
+
 export default function Profile() {
   const entries = useMoodEntries();
   const streak = useMoodStreak();
@@ -141,7 +149,13 @@ export default function Profile() {
   const [editOpen, setEditOpen] = useState(false);
   const [draft, setDraft] = useState<ProfileData>(profile);
 
-  const userPosts = useMemo(loadUserPosts, []);
+  const [userPosts, setUserPosts] = useState<Post[]>(loadUserPosts);
+  const [postDraft, setPostDraft] = useState('');
+  const [postChip, setPostChip] = useState<string | null>(null);
+  const [postImage, setPostImage] = useState<string | null>(null);
+  const [justShared, setJustShared] = useState(false);
+  const postImageInputRef = useRef<HTMLInputElement>(null);
+  const postTextareaRef = useRef<HTMLTextAreaElement>(null);
   const savedPosts = useMemo(() => loadSavedPosts(userPosts), [userPosts]);
   const highlights = useMemo(() => journalEntries.filter((e) => e.starred), [journalEntries]);
 
@@ -173,6 +187,66 @@ export default function Profile() {
     setProfile(draft);
     localStorage.setItem(PROFILE_KEY, JSON.stringify(draft));
     setEditOpen(false);
+  };
+
+  const sharePost = () => {
+    const body = postDraft.trim();
+    if (!body && !postImage) return;
+    const chipDef = COMPOSER_MOODS.find((c) => c.label === postChip);
+    const meta = chipDef ? moodMeta(chipDef.mood) : null;
+    const firstLine = body.split('\n')[0];
+    const post: Post = {
+      id: `user-${Date.now()}`,
+      author: profile.pseudonym || profile.name || 'Me',
+      avatarColor: profile.avatarColor,
+      time: 'now',
+      moodChip: postChip && meta ? { label: postChip, bg: meta.chipBg, text: meta.chipText } : undefined,
+      title: firstLine.length > 60 ? `${firstLine.slice(0, 60)}…` : firstLine || 'A quiet share',
+      body,
+      ...(postImage ? { image: postImage } : {}),
+      hugs: 0,
+      replies: 0,
+    };
+    const next = [post, ...userPosts];
+    setUserPosts(next);
+    try {
+      localStorage.setItem(USER_POSTS_KEY, JSON.stringify(next));
+    } catch {
+      /* image too large to persist — post stays for this session */
+    }
+    setPostDraft('');
+    setPostChip(null);
+    setPostImage(null);
+    setJustShared(true);
+    setTab('posts');
+    if (postTextareaRef.current) postTextareaRef.current.style.height = 'auto';
+    window.setTimeout(() => setJustShared(false), 2600);
+  };
+
+  const autoGrowPost = () => {
+    const el = postTextareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+  };
+
+  const pickPostImage = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    readImageFile(file, (dataUrl) => setPostImage(dataUrl));
+  };
+
+  const updatePost = (id: string, patch: Partial<Post>) => {
+    setUserPosts((prev) => {
+      const next = prev.map((p) => (p.id === id ? { ...p, ...patch } : p));
+      try {
+        localStorage.setItem(USER_POSTS_KEY, JSON.stringify(next));
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
   };
 
   return (
@@ -301,7 +375,122 @@ export default function Profile() {
         )}
       </motion.section>
 
-      {/* 4–5. Tabs: posts / saved / highlights */}
+      {/* 4. Composer — mirrors the Home "Let it out" card */}
+      <section>
+        <h2 className="mb-3 text-[20px] font-bold text-haven-text">Let it out</h2>
+        <motion.section
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.35, delay: 0.2, ease: [0.22, 1, 0.36, 1] }}
+          className="rounded-2xl border border-haven-border bg-white p-5 shadow-card transition-shadow duration-200 focus-within:shadow-card-hover"
+        >
+          <div className="flex gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#8B7BC7] text-sm font-semibold text-white">
+              M
+            </span>
+            <textarea
+              ref={postTextareaRef}
+              value={postDraft}
+              onChange={(e) => {
+                setPostDraft(e.target.value);
+                autoGrowPost();
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  sharePost();
+                }
+              }}
+              rows={2}
+              placeholder="How are you feeling today? It's okay to not be okay…"
+              className="w-full resize-none rounded-xl border border-haven-border bg-haven-canvas px-3 py-2 text-[15px] leading-relaxed text-haven-text transition-colors duration-200 placeholder:text-haven-text-muted/70 focus:outline-none focus:ring-2 focus:ring-haven-primary/40"
+            />
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-2 pl-[52px]">
+            {COMPOSER_MOODS.map((c) => {
+              const meta = moodMeta(c.mood);
+              const active = postChip === c.label;
+              return (
+                <button
+                  key={c.label}
+                  type="button"
+                  onClick={() => setPostChip(active ? null : c.label)}
+                  aria-pressed={active}
+                  className={cn(
+                    'rounded-full border px-3 py-1 text-[13px] font-medium transition-all duration-200 ease-soft',
+                    active
+                      ? 'border-transparent'
+                      : 'border-haven-border bg-white text-haven-text-muted hover:bg-haven-canvas',
+                  )}
+                  style={active ? { backgroundColor: meta.chipBg, color: meta.chipText } : undefined}
+                >
+                  {c.label}
+                </button>
+              );
+            })}
+            <button
+              type="button"
+              onClick={() => postImageInputRef.current?.click()}
+              aria-label="Add a photo or GIF"
+              title="Add a photo or GIF"
+              className="flex items-center gap-1.5 rounded-full border border-haven-border bg-white px-3 py-1 text-[13px] font-medium text-haven-text-muted transition-all duration-200 ease-soft hover:border-haven-primary/40 hover:text-haven-primary"
+            >
+              <ImagePlus size={14} strokeWidth={1.75} />
+              Photo/GIF
+            </button>
+            <input
+              ref={postImageInputRef}
+              type="file"
+              accept="image/*,.gif"
+              className="hidden"
+              onChange={pickPostImage}
+            />
+          </div>
+          <AnimatePresence>
+            {postImage && (
+              <motion.div
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 6 }}
+                transition={{ duration: 0.25 }}
+                className="relative ml-[52px] mt-3 w-fit"
+              >
+                <img
+                  src={postImage}
+                  alt="Attached preview"
+                  className="max-h-40 rounded-xl border border-haven-border object-cover"
+                />
+                <button
+                  type="button"
+                  onClick={() => setPostImage(null)}
+                  aria-label="Remove attachment"
+                  className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-white text-haven-text shadow-card transition-colors hover:text-haven-danger"
+                >
+                  <X size={13} strokeWidth={2} />
+                </button>
+              </motion.div>
+            )}
+          </AnimatePresence>
+          <AnimatePresence>
+            {justShared && (
+              <motion.p
+                initial={{ opacity: 0, y: 4 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+                className="mt-2 flex items-center gap-1.5 pl-[52px] text-[13px] font-medium text-haven-primary"
+              >
+                <Check size={14} strokeWidth={2} /> Shared — find it in your Posts tab below.
+              </motion.p>
+            )}
+          </AnimatePresence>
+          <p className="mt-2 pl-[52px] text-[13px] text-haven-text-muted">
+            Posts are anonymous by default. Press Enter to share, Shift+Enter for a new line.
+          </p>
+        </motion.section>
+      </section>
+
+      {/* 5–6. Tabs: posts / saved / highlights */}
       <section>
         <div className="flex gap-6 border-b border-haven-border">
           {TABS.map((t) => (
@@ -327,7 +516,9 @@ export default function Profile() {
 
         <div className="mt-5 space-y-4">
           {tab === 'posts' &&
-            userPosts.map((post, i) => <PostCard key={post.id} post={post} index={i} />)}
+            userPosts.map((post, i) => (
+              <PostCard key={post.id} post={post} index={i} onUpdate={updatePost} />
+            ))}
 
           {tab === 'saved' &&
             (savedPosts.length ? (
