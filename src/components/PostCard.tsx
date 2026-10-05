@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Bookmark, Flag, ImagePlus, Info, MessageCircle, MoreHorizontal, ShieldBan, Trash2, X } from 'lucide-react';
 import HugIcon from '@/components/HugIcon';
+import CommentSection, { getCommentCount } from '@/components/CommentSection';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
@@ -23,6 +24,10 @@ interface PostCardProps {
   index?: number;
   onDelete?: (id: string) => void;
   onUpdate?: (id: string, patch: Partial<Post>) => void;
+  /** Open the comment section on mount (used when arriving from a notification). */
+  autoOpenComments?: boolean;
+  /** Briefly highlight the card (used when arriving from a notification). */
+  highlighted?: boolean;
 }
 
 export function readImageFile(file: File, onDone: (dataUrl: string) => void) {
@@ -39,10 +44,12 @@ export function readImageFile(file: File, onDone: (dataUrl: string) => void) {
   reader.readAsDataURL(file);
 }
 
-export default function PostCard({ post, index = 0, onDelete, onUpdate }: PostCardProps) {
+export default function PostCard({ post, index = 0, onDelete, onUpdate, autoOpenComments = false, highlighted = false }: PostCardProps) {
   const [hugged, setHugged] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [commentsOpen, setCommentsOpen] = useState(autoOpenComments);
+  const [commentCount, setCommentCount] = useState(() => getCommentCount(post.id, post.replies));
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -123,11 +130,15 @@ export default function PostCard({ post, index = 0, onDelete, onUpdate }: PostCa
   return (
     <>
     <motion.article
+      id={`post-${post.id}`}
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.35, delay: index * 0.06, ease: [0.22, 1, 0.36, 1] }}
       whileHover={{ y: -2 }}
-      className="rounded-2xl border border-haven-border bg-white p-5 shadow-card transition-shadow duration-200 hover:shadow-card-hover"
+      className={cn(
+        'scroll-mt-24 rounded-2xl border bg-white p-5 shadow-card transition-shadow duration-200 hover:shadow-card-hover',
+        highlighted ? 'border-haven-primary/60 ring-2 ring-haven-primary/30' : 'border-haven-border',
+      )}
     >
       <div className="flex items-center gap-3">
         <span
@@ -293,10 +304,18 @@ export default function PostCard({ post, index = 0, onDelete, onUpdate }: PostCa
           </span>
           {post.hugs + (hugged ? 1 : 0)} hugs
         </button>
-        <span className="flex items-center gap-1.5 text-[13px] font-medium text-haven-text-muted">
+        <button
+          type="button"
+          onClick={() => setCommentsOpen((o) => !o)}
+          aria-expanded={commentsOpen}
+          className={cn(
+            'flex items-center gap-1.5 text-[13px] font-medium transition-colors',
+            commentsOpen ? 'text-haven-primary' : 'text-haven-text-muted hover:text-haven-primary',
+          )}
+        >
           <MessageCircle size={18} strokeWidth={1.75} />
-          {post.replies} replies
-        </span>
+          {commentCount} {commentCount === 1 ? 'reply' : 'replies'}
+        </button>
         <button
           type="button"
           onClick={toggleSave}
@@ -307,6 +326,21 @@ export default function PostCard({ post, index = 0, onDelete, onUpdate }: PostCa
           <Bookmark size={18} strokeWidth={1.75} className={cn(saved && 'fill-haven-primary text-haven-primary')} />
         </button>
       </div>
+
+      <AnimatePresence initial={false}>
+        {commentsOpen && (
+          <motion.div
+            key="comments"
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+            className="overflow-hidden"
+          >
+            <CommentSection postId={post.id} onCountChange={setCommentCount} />
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.article>
 
       {/* Details popover */}
