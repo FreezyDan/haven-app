@@ -53,12 +53,22 @@
 }
 
 @layer utilities {
+  .scrollbar-calm {
+    scrollbar-width: thin;
+    scrollbar-color: #c9c9e8 transparent;
+  }
   .scrollbar-calm::-webkit-scrollbar {
     width: 8px;
   }
+  .scrollbar-calm::-webkit-scrollbar-track {
+    background: transparent;
+  }
   .scrollbar-calm::-webkit-scrollbar-thumb {
-    background: #d8d8d0;
+    background: #c9c9e8;
     border-radius: 999px;
+  }
+  .scrollbar-calm::-webkit-scrollbar-thumb:hover {
+    background: #a8a8e0;
   }
 }
 
