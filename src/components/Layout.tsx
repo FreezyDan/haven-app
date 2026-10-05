@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { Link, Outlet, useLocation } from 'react-router';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Toaster } from 'sonner';
@@ -8,6 +8,7 @@ import CrisisModal from '@/components/CrisisModal';
 import CheckInModal from '@/components/CheckInModal';
 import type { MoodValue } from '@/lib/moodStore';
 import { ARTICLES } from '@/lib/blogData';
+import { BG_CHANGED_EVENT, loadBg, type BgChoice } from '@/lib/bgStore';
 
 interface HavenUi {
   openCrisis: (opts?: { fromCareCard?: boolean }) => void;
@@ -42,9 +43,32 @@ export default function Layout() {
 
   const ui = useMemo(() => ({ openCrisis, openCheckIn }), [openCrisis, openCheckIn]);
 
+  // User-chosen page backdrop — only the shell background, never component interiors.
+  const [bg, setBg] = useState<BgChoice | null>(loadBg);
+  useEffect(() => {
+    const onChange = () => setBg(loadBg());
+    window.addEventListener(BG_CHANGED_EVENT, onChange);
+    window.addEventListener('storage', onChange);
+    return () => {
+      window.removeEventListener(BG_CHANGED_EVENT, onChange);
+      window.removeEventListener('storage', onChange);
+    };
+  }, []);
+
+  const bgStyle: React.CSSProperties | undefined = bg
+    ? bg.type === 'color'
+      ? { backgroundColor: bg.value }
+      : {
+          backgroundImage: `url(${bg.value})`,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+          backgroundAttachment: 'fixed',
+        }
+    : undefined;
+
   return (
     <HavenUiContext.Provider value={ui}>
-      <div className="min-h-[100dvh] bg-haven-canvas">
+      <div className="min-h-[100dvh] bg-haven-canvas" style={bgStyle}>
         <Sidebar />
         <div className="ml-[248px] flex min-h-[100dvh] flex-col">
           <Topbar />
@@ -62,12 +86,12 @@ export default function Layout() {
                 </motion.div>
               </AnimatePresence>
             </main>
-            <aside className="sticky top-[73px] hidden w-80 shrink-0 self-start px-6 py-8 xl:block">
+            <aside className="sticky top-[73px] hidden max-h-[calc(100dvh-73px)] w-80 shrink-0 self-start overflow-hidden px-6 py-8 xl:block">
               <h2 className="mb-4 font-serif text-lg font-semibold text-haven-text">
                 Something good for you…
               </h2>
-              <div className="space-y-4">
-                {ARTICLES.slice(0, 4).map((a, i) => (
+              <div className="scrollbar-calm max-h-[calc(100dvh-73px-7rem)] space-y-4 overflow-y-auto pb-2 pr-2">
+                {ARTICLES.map((a, i) => (
                   <motion.div
                     key={a.slug}
                     initial={{ opacity: 0, y: 14 }}
