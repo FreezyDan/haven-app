@@ -3,10 +3,15 @@ import { useNavigate } from 'react-router';
 import { AnimatePresence, motion } from 'framer-motion';
 import { CalendarCheck, Heart, Leaf, MessageCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { useHavenUi } from '@/components/Layout';
 
 type NotificationType = 'hug' | 'reply' | 'checkin' | 'wellness';
 type Filter = 'all' | 'hug' | 'reply' | 'checkin';
+
+type NotificationTarget =
+  | { kind: 'post'; postId: string }
+  | { kind: 'mood' }
+  | { kind: 'journal' }
+  | { kind: 'blogs' };
 
 interface HavenNotification {
   id: string;
@@ -15,6 +20,7 @@ interface HavenNotification {
   excerpt: string;
   time: string;
   unread: boolean;
+  target: NotificationTarget;
 }
 
 const FILTERS: { id: Filter; label: string }[] = [
@@ -42,6 +48,7 @@ const SEED: HavenNotification[] = [
     excerpt: "on your post 'Some days are just heavy.'",
     time: '12m',
     unread: true,
+    target: { kind: 'post', postId: 'seed-1' },
   },
   {
     id: 'n2',
@@ -50,6 +57,7 @@ const SEED: HavenNotification[] = [
     excerpt: 'I hear you. Mud days are still days you survived. 💚',
     time: '40m',
     unread: true,
+    target: { kind: 'post', postId: 'seed-1' },
   },
   {
     id: 'n3',
@@ -58,6 +66,7 @@ const SEED: HavenNotification[] = [
     excerpt: 'How are you feeling right now? It takes 10 seconds.',
     time: '2h',
     unread: true,
+    target: { kind: 'mood' },
   },
   {
     id: 'n4',
@@ -66,6 +75,7 @@ const SEED: HavenNotification[] = [
     excerpt: "on 'Small win today'.",
     time: '5h',
     unread: false,
+    target: { kind: 'post', postId: 'seed-2' },
   },
   {
     id: 'n5',
@@ -74,6 +84,7 @@ const SEED: HavenNotification[] = [
     excerpt: "No pressure to keep a streak — just noticing you. We're glad you're here.",
     time: '1d',
     unread: false,
+    target: { kind: 'mood' },
   },
   {
     id: 'n6',
@@ -82,6 +93,7 @@ const SEED: HavenNotification[] = [
     excerpt: 'Box breathing helps me before meetings — 4 in, 4 hold, 4 out…',
     time: '1d',
     unread: false,
+    target: { kind: 'post', postId: 'seed-3' },
   },
 ];
 
@@ -89,7 +101,6 @@ const EASE = [0.22, 1, 0.36, 1] as [number, number, number, number];
 
 export default function Notifications() {
   const navigate = useNavigate();
-  const { openCheckIn } = useHavenUi();
   const [filter, setFilter] = useState<Filter>('all');
   const [items, setItems] = useState<HavenNotification[]>(SEED);
   const [cascadeTick, setCascadeTick] = useState(0);
@@ -110,10 +121,20 @@ export default function Notifications() {
 
   const handleClick = (n: HavenNotification) => {
     markRead(n.id);
-    if (n.type === 'checkin') {
-      openCheckIn();
-    } else {
-      navigate('/');
+    switch (n.target.kind) {
+      case 'post':
+        // Jump straight to the post on Home and open its comments
+        navigate('/', { state: { focusPost: n.target.postId, openComments: true } });
+        break;
+      case 'mood':
+        navigate('/mood');
+        break;
+      case 'journal':
+        navigate('/journal');
+        break;
+      case 'blogs':
+        navigate('/blogs');
+        break;
     }
   };
 

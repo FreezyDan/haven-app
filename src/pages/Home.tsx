@@ -1,8 +1,10 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation } from 'react-router';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Check, ImagePlus, Leaf, X } from 'lucide-react';
 import PostCard, { readImageFile, type Post } from '@/components/PostCard';
 import ExtraCareCard, { isCareCardDismissedToday } from '@/components/ExtraCareCard';
+import InspireSection from '@/components/inspire/InspireSection';
 import { useHavenUi } from '@/components/Layout';
 import { MOODS, moodMeta, needsExtraCare, useMoodEntries, useMoodToday, type MoodValue } from '@/lib/moodStore';
 import { cn } from '@/lib/utils';
@@ -74,6 +76,18 @@ function loadUserPosts(): Post[] {
 
 export default function Home() {
   const { openCheckIn, openCrisis } = useHavenUi();
+  const location = useLocation();
+  const focusPost = (location.state as { focusPost?: string } | null)?.focusPost ?? null;
+
+  useEffect(() => {
+    if (!focusPost) return;
+    const t = window.setTimeout(() => {
+      document
+        .getElementById(`post-${focusPost}`)
+        ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 250);
+    return () => window.clearTimeout(t);
+  }, [focusPost]);
   useMoodEntries();
   const todayEntry = useMoodToday();
   const todayMeta = todayEntry ? moodMeta(todayEntry.mood) : null;
@@ -172,9 +186,19 @@ export default function Home() {
     window.setTimeout(() => setJustShared(false), 2600);
   };
 
+  // Whole-section kill switch from Settings — respected instantly.
+  const inspireEnabled = useMemo(() => {
+    try {
+      const s = JSON.parse(localStorage.getItem('haven.settings') ?? '{}') as { inspireSection?: boolean };
+      return s.inspireSection !== false;
+    } catch {
+      return true;
+    }
+  }, []);
+
   return (
     <div className="ml-2 mr-auto max-w-2xl lg:ml-6">
-      {/* 1. Gentle reminder banner */}
+      {/* 1. Gentle reminder banner — always at the very top */}
       <AnimatePresence>
         {bannerVisible && (
           <motion.div
@@ -202,6 +226,9 @@ export default function Home() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* 0. Inspirational top section */}
+      {inspireEnabled && <InspireSection />}
 
       {/* 2. Extra-care card slot */}
       {showCareCard && (
@@ -387,9 +414,6 @@ export default function Home() {
       </motion.section>
 
       {/* 5. Feed */}
-      <p className="mb-4 text-[13px] font-bold uppercase tracking-[0.08em] text-haven-text-muted">
-        Feed
-      </p>
       {posts.length === 0 ? (
         <div className="flex flex-col items-center rounded-2xl border border-haven-border bg-white px-6 py-12 text-center shadow-card">
           <img src="/empty-feed.svg" alt="" className="w-60" />
@@ -409,6 +433,8 @@ export default function Home() {
               index={Math.min(i, 8)}
               onDelete={deletePost}
               onUpdate={updatePost}
+              autoOpenComments={post.id === focusPost}
+              highlighted={post.id === focusPost}
             />
           ))}
         </div>
