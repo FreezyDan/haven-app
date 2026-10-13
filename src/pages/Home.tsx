@@ -3,6 +3,11 @@ import { useLocation } from 'react-router';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Check, ImagePlus, Leaf, X } from 'lucide-react';
 import PostCard, { readImageFile, type Post } from '@/components/PostCard';
+import AudiencePicker, {
+  DEFAULT_AUDIENCE,
+  audienceLabels,
+  type AudienceSelection,
+} from '@/components/AudiencePicker';
 import ExtraCareCard, { isCareCardDismissedToday } from '@/components/ExtraCareCard';
 import InspireSection from '@/components/inspire/InspireSection';
 import { useHavenUi } from '@/components/Layout';
@@ -105,6 +110,7 @@ export default function Home() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [draftImage, setDraftImage] = useState<string | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const [audience, setAudience] = useState<AudienceSelection>(DEFAULT_AUDIENCE);
 
   const pickDraftImage = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -168,6 +174,7 @@ export default function Home() {
       title: firstLine.length > 60 ? `${firstLine.slice(0, 60)}…` : firstLine || 'A quiet share',
       body,
       ...(draftImage ? { image: draftImage } : {}),
+      ...(audienceLabels(audience).length ? { audience: audienceLabels(audience) } : {}),
       hugs: 0,
       replies: 0,
     };
@@ -181,6 +188,7 @@ export default function Home() {
     setText('');
     setChip(null);
     setDraftImage(null);
+    setAudience(DEFAULT_AUDIENCE);
     setJustShared(true);
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
     window.setTimeout(() => setJustShared(false), 2600);
@@ -197,7 +205,7 @@ export default function Home() {
   }, []);
 
   return (
-    <div className="ml-2 mr-auto max-w-2xl lg:ml-6">
+    <div className="mx-auto w-full">
       {/* 1. Gentle reminder banner — always at the very top */}
       <AnimatePresence>
         {bannerVisible && (
@@ -238,7 +246,7 @@ export default function Home() {
       )}
 
       {/* 3. Today's check-in strip */}
-      <h2 className="mb-3 text-[20px] font-bold text-haven-text">Daily check in</h2>
+      <h2 className="mb-3 font-serif text-[22px] font-medium text-haven-text">Daily check in</h2>
       <motion.section
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
@@ -301,7 +309,7 @@ export default function Home() {
       </motion.section>
 
       {/* 4. Composer */}
-      <h2 className="mb-3 text-[20px] font-bold text-haven-text">Let it out</h2>
+      <h2 className="mb-3 font-serif text-[22px] font-medium text-haven-text">Let it out</h2>
       <motion.section
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
@@ -369,7 +377,16 @@ export default function Home() {
             className="hidden"
             onChange={pickDraftImage}
           />
+          <button
+            type="button"
+            onClick={share}
+            disabled={!text.trim() && !draftImage}
+            className="ml-auto rounded-full bg-haven-primary px-5 py-1.5 text-[13px] font-semibold text-white transition-all duration-200 ease-soft hover:bg-haven-primary-hover disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Share
+          </button>
         </div>
+        <AudiencePicker value={audience} onChange={setAudience} />
         <AnimatePresence>
           {draftImage && (
             <motion.div
