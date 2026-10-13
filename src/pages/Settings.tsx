@@ -284,7 +284,7 @@ export default function Settings() {
         <ToggleRow
           icon={Lock}
           label="Private journal"
-          description="Journal and mood notes stay on this device only."
+          description="Only you can read your journal and mood notes."
           on={settings.privateJournal}
           onToggle={() => update('privateJournal', !settings.privateJournal)}
         />
@@ -404,9 +404,9 @@ export default function Settings() {
 
       {/* 4. Data & storage */}
       <SectionCard eyebrow="Data & storage" delay={240}>
-        <p className="text-sm font-semibold text-[#23223A]">Your data lives on this device</p>
+        <p className="text-sm font-semibold text-[#23223A]">Your data belongs to you</p>
         <p className="mt-1 text-[13px] leading-relaxed text-[#6E6E88]">
-          Everything you've shared with Haven — moods, journal entries, settings — is stored locally in this browser. Nothing leaves your device.
+          Everything you've shared with Haven — moods, journal entries, settings — is kept safe and private. You can download a copy of it anytime.
         </p>
         <div className="mt-4 flex flex-wrap items-center gap-3">
           <button
@@ -425,7 +425,7 @@ export default function Settings() {
           </button>
         </div>
         {exported && <p className="mt-3 text-[13px] font-medium text-[#6E6CF0]">Your data was downloaded as a JSON file.</p>}
-        {deleted && <p className="mt-3 text-[13px] font-medium text-[#6E6CF0]">All local Haven data has been removed from this device.</p>}
+        {deleted && <p className="mt-3 text-[13px] font-medium text-[#6E6CF0]">All your Haven data has been removed.</p>}
       </SectionCard>
 
       {/* 5. Account */}
@@ -509,7 +509,7 @@ export default function Settings() {
       {showDelete && (
         <Modal title="Delete all my data" onClose={() => setShowDelete(false)}>
           <p className="mt-2 text-sm leading-relaxed text-[#6E6E88]">
-            This permanently removes every Haven entry on this device — moods, journal entries, saved articles, and settings. There is no undo. If you'd like a copy first, use "Export my data."
+            This permanently removes all of your Haven data — moods, journal entries, saved articles, and settings. There is no undo. If you'd like a copy first, use "Export my data."
           </p>
           <label className="mt-4 block text-sm font-semibold text-[#23223A]">
             Type <span className="font-[Fraunces,serif] italic text-[#A33B32]">delete</span> to confirm

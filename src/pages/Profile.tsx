@@ -1,9 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Link } from 'react-router';
-import { BookOpen, CalendarCheck, Check, Heart, ImagePlus, Lock, ShieldCheck, Star, X } from 'lucide-react';
+import { BookOpen, CalendarCheck, Check, Eye, EyeOff, ImagePlus, Lock, ShieldCheck, Star, X } from 'lucide-react';
 import HugIcon from '@/components/HugIcon';
 import PostCard, { readImageFile, type Post } from '@/components/PostCard';
+import AudiencePicker, {
+  DEFAULT_AUDIENCE,
+  audienceLabels,
+  type AudienceSelection,
+} from '@/components/AudiencePicker';
 import MoodChip from '@/components/MoodChip';
 import {
   moodMeta,
@@ -150,9 +155,13 @@ export default function Profile() {
   const [draft, setDraft] = useState<ProfileData>(profile);
 
   const [userPosts, setUserPosts] = useState<Post[]>(loadUserPosts);
+  const [hideMetrics, setHideMetrics] = useState(
+    () => localStorage.getItem('haven.profileHideMetrics') === '1',
+  );
   const [postDraft, setPostDraft] = useState('');
   const [postChip, setPostChip] = useState<string | null>(null);
   const [postImage, setPostImage] = useState<string | null>(null);
+  const [postAudience, setPostAudience] = useState<AudienceSelection>(DEFAULT_AUDIENCE);
   const [justShared, setJustShared] = useState(false);
   const postImageInputRef = useRef<HTMLInputElement>(null);
   const postTextareaRef = useRef<HTMLTextAreaElement>(null);
@@ -178,7 +187,6 @@ export default function Profile() {
 
   const stats = [
     { label: 'Days journaled', value: journalEntries.length, icon: BookOpen, color: '#6E6CF0' },
-    { label: 'Hugs received', value: hugStats.received, icon: Heart, color: '#C0453B' },
     { label: 'Hugs given', value: hugStats.given, icon: HugIcon, color: '#6E6CF0' },
     { label: 'Check-ins this month', value: checkInsThisMonth, icon: CalendarCheck, color: '#6E6CF0' },
   ];
@@ -204,6 +212,7 @@ export default function Profile() {
       title: firstLine.length > 60 ? `${firstLine.slice(0, 60)}…` : firstLine || 'A quiet share',
       body,
       ...(postImage ? { image: postImage } : {}),
+      ...(audienceLabels(postAudience).length ? { audience: audienceLabels(postAudience) } : {}),
       hugs: 0,
       replies: 0,
     };
@@ -217,6 +226,7 @@ export default function Profile() {
     setPostDraft('');
     setPostChip(null);
     setPostImage(null);
+    setPostAudience(DEFAULT_AUDIENCE);
     setJustShared(true);
     setTab('posts');
     if (postTextareaRef.current) postTextareaRef.current.style.height = 'auto';
@@ -296,28 +306,57 @@ export default function Profile() {
         </div>
       </motion.section>
 
-      {/* 2. Activity stats */}
+      {/* 2. Activity stats — optional; the user can tuck them away */}
       <section>
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-          {stats.map((stat, i) => (
-            <motion.div
-              key={stat.label}
-              initial={{ opacity: 0, y: 14 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.35, delay: i * 0.06, ease: [0.22, 1, 0.36, 1] }}
-              className="rounded-2xl border border-haven-border bg-white p-4 shadow-card"
-            >
-              <stat.icon size={18} strokeWidth={1.75} style={{ color: stat.color }} />
-              <p className="mt-2 text-[26px] font-semibold leading-none text-haven-primary">
-                <CountUp value={stat.value} />
-              </p>
-              <p className="mt-1.5 text-xs font-medium text-haven-text-muted">{stat.label}</p>
-            </motion.div>
-          ))}
+        <div className="mb-2 flex justify-end">
+          <button
+            type="button"
+            onClick={() =>
+              setHideMetrics((h) => {
+                const next = !h;
+                localStorage.setItem('haven.profileHideMetrics', next ? '1' : '0');
+                return next;
+              })
+            }
+            aria-pressed={hideMetrics}
+            className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] font-medium text-haven-text-muted transition-colors hover:bg-white hover:text-haven-primary"
+          >
+            {hideMetrics ? (
+              <Eye size={13} strokeWidth={1.75} />
+            ) : (
+              <EyeOff size={13} strokeWidth={1.75} />
+            )}
+            {hideMetrics ? 'Show my numbers' : 'Hide my numbers'}
+          </button>
         </div>
-        <p className="mt-3 text-center text-[13px] text-haven-text-muted">
-          These numbers are just for you — a quiet record of you showing up.
-        </p>
+        {hideMetrics ? (
+          <p className="rounded-2xl border border-haven-border bg-white px-6 py-8 text-center text-sm text-haven-text-muted shadow-card">
+            Your numbers are tucked away. They're here whenever you want them — no pressure either way.
+          </p>
+        ) : (
+          <>
+            <div className="grid grid-cols-3 gap-4">
+              {stats.map((stat, i) => (
+                <motion.div
+                  key={stat.label}
+                  initial={{ opacity: 0, y: 14 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.35, delay: i * 0.06, ease: [0.22, 1, 0.36, 1] }}
+                  className="rounded-2xl border border-haven-border bg-white p-4 shadow-card"
+                >
+                  <stat.icon size={18} strokeWidth={1.75} style={{ color: stat.color }} />
+                  <p className="mt-2 text-[26px] font-semibold leading-none text-haven-primary">
+                    <CountUp value={stat.value} />
+                  </p>
+                  <p className="mt-1.5 text-xs font-medium text-haven-text-muted">{stat.label}</p>
+                </motion.div>
+              ))}
+            </div>
+            <p className="mt-3 text-center text-[13px] text-haven-text-muted">
+              These numbers are just for you — a quiet record of you showing up.
+            </p>
+          </>
+        )}
       </section>
 
       {/* 3. Mood snapshot strip */}
@@ -445,7 +484,16 @@ export default function Profile() {
               className="hidden"
               onChange={pickPostImage}
             />
+            <button
+              type="button"
+              onClick={sharePost}
+              disabled={!postDraft.trim() && !postImage}
+              className="ml-auto rounded-full bg-haven-primary px-5 py-1.5 text-[13px] font-semibold text-white transition-all duration-200 ease-soft hover:bg-haven-primary-hover disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Share
+            </button>
           </div>
+          <AudiencePicker value={postAudience} onChange={setPostAudience} />
           <AnimatePresence>
             {postImage && (
               <motion.div
@@ -673,7 +721,7 @@ export default function Profile() {
 
               <p className="mt-4 flex items-center gap-1.5 text-xs text-haven-text-muted">
                 <Lock size={13} strokeWidth={1.75} />
-                Saved only on this device.
+                Only you can see this.
               </p>
               <button
                 type="button"
@@ -681,7 +729,7 @@ export default function Profile() {
                 className="mt-4 w-full rounded-full bg-haven-primary py-3 text-sm font-semibold text-white transition-all duration-200 ease-soft hover:bg-haven-primary-hover"
               >
                 Save changes
-              </button>
+                   </button>
             </motion.div>
           </motion.div>
         )}
