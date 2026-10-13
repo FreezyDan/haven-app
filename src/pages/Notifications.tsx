@@ -71,8 +71,8 @@ const SEED: HavenNotification[] = [
   {
     id: 'n4',
     type: 'hug',
-    title: 'Anonymous otter and 8 others sent hugs',
-    excerpt: "on 'Small win today'.",
+    title: 'A few people sent you hugs',
+    excerpt: "on 'Small win today' — you're not alone in this.",
     time: '5h',
     unread: false,
     target: { kind: 'post', postId: 'seed-2' },
@@ -99,6 +99,16 @@ const SEED: HavenNotification[] = [
 
 const EASE = [0.22, 1, 0.36, 1] as [number, number, number, number];
 
+/** Check-in reminders only appear when the user has them turned on in Settings. */
+function remindersEnabled(): boolean {
+  try {
+    const s = JSON.parse(localStorage.getItem('haven.settings') ?? '{}') as { dailyReminder?: boolean };
+    return s.dailyReminder !== false;
+  } catch {
+    return true;
+  }
+}
+
 export default function Notifications() {
   const navigate = useNavigate();
   const [filter, setFilter] = useState<Filter>('all');
@@ -106,7 +116,12 @@ export default function Notifications() {
   const [cascadeTick, setCascadeTick] = useState(0);
 
   const visible = useMemo(
-    () => items.filter((n) => filter === 'all' || n.type === filter),
+    () =>
+      items.filter(
+        (n) =>
+          (filter === 'all' || n.type === filter) &&
+          (n.type !== 'checkin' || remindersEnabled()),
+      ),
     [items, filter],
   );
 

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Bookmark, Flag, ImagePlus, Info, MessageCircle, MoreHorizontal, ShieldBan, Trash2, X } from 'lucide-react';
+import { Bookmark, Flag, HeartHandshake, Info, MessageCircle, MoreHorizontal, ShieldBan, Trash2, X } from 'lucide-react';
 import HugIcon from '@/components/HugIcon';
 import CommentSection, { getCommentCount } from '@/components/CommentSection';
 import { toast } from 'sonner';
@@ -15,6 +15,8 @@ export interface Post {
   title: string;
   body: string;
   image?: string;
+  /** Audience groups the poster chose — empty/undefined means everyone. */
+  audience?: string[];
   hugs: number;
   replies: number;
 }
@@ -90,23 +92,7 @@ export default function PostCard({ post, index = 0, onDelete, onUpdate, autoOpen
     }
   });
   const [expanded, setExpanded] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const isOwnPost = post.id.startsWith('user-');
-
-  const pickImage = () => {
-    setMenuOpen(false);
-    fileInputRef.current?.click();
-  };
-
-  const onImageChosen = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file) return;
-    readImageFile(file, (dataUrl) => {
-      onUpdate?.(post.id, { image: dataUrl });
-      toast('Photo added to your post.');
-    });
-  };
 
   const toggleHug = () => {
     setHugged((h) => !h);
@@ -205,17 +191,6 @@ export default function PostCard({ post, index = 0, onDelete, onUpdate, autoOpen
                     {item.label}
                   </button>
                 ))}
-                {isOwnPost && onUpdate && (
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={pickImage}
-                    className="flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm text-haven-text transition-colors hover:bg-haven-canvas"
-                  >
-                    <ImagePlus size={15} strokeWidth={1.75} />
-                    Add photo/GIF
-                  </button>
-                )}
               </motion.div>
             )}
           </AnimatePresence>
@@ -243,6 +218,12 @@ export default function PostCard({ post, index = 0, onDelete, onUpdate, autoOpen
         )}
       </div>
 
+      {post.audience && post.audience.length > 0 && (
+        <p className="mt-2 text-[12px] text-haven-text-muted">
+          Shared with: {post.audience.join(' · ')}
+        </p>
+      )}
+
       {post.image && (
         <div className="group relative mt-3">
           <img
@@ -263,13 +244,23 @@ export default function PostCard({ post, index = 0, onDelete, onUpdate, autoOpen
         </div>
       )}
 
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/*,.gif"
-        className="hidden"
-        onChange={onImageChosen}
-      />
+      {/* Quiet reassurance while a post is still waiting for its first hug */}
+      <AnimatePresence initial={false}>
+        {post.hugs + (hugged ? 1 : 0) === 0 && (
+          <motion.p
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
+            className="overflow-hidden"
+          >
+            <span className="mt-3 flex w-fit items-center gap-1.5 rounded-full bg-haven-primary-soft/70 px-3 py-1 text-[12px] font-medium text-haven-primary/90">
+              <HeartHandshake size={13} strokeWidth={1.75} className="shrink-0" />
+              Being shared with people who may be able to help you
+            </span>
+          </motion.p>
+        )}
+      </AnimatePresence>
 
       <div className="mt-4 flex items-center gap-5 border-t border-haven-border pt-3">
         <button
@@ -302,7 +293,11 @@ export default function PostCard({ post, index = 0, onDelete, onUpdate, autoOpen
               />
             )}
           </span>
-          {post.hugs + (hugged ? 1 : 0)} hugs
+          {post.hugs + (hugged ? 1 : 0) > 0 ? (
+            <>{post.hugs + (hugged ? 1 : 0)} hugs</>
+          ) : (
+            <>hug</>
+          )}
         </button>
         <button
           type="button"

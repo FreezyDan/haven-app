@@ -119,7 +119,7 @@ export default function Journal() {
         </span>
         <p className="text-sm leading-relaxed text-haven-text">
           <span className="font-semibold">Private by design.</span> Your journal entries and mood
-          notes are stored only on this device. No one — not moderators, not other members — can
+          notes are yours alone. No one — not moderators, not other members — can
           see them.
         </p>
       </motion.div>
