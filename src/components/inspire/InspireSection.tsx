@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { AnimatePresence, motion } from 'framer-motion';
-import { BookOpen, ChevronDown, ChevronLeft, ChevronRight, EyeOff, HeartHandshake, Leaf, LifeBuoy, Quote, RotateCcw, Sprout } from 'lucide-react';
+import { BookOpen, ChevronDown, ChevronLeft, ChevronRight, EyeOff, HeartHandshake, Leaf, LifeBuoy, Pause, Play, Quote, RotateCcw, Sprout } from 'lucide-react';
 import { useHavenUi } from '@/components/Layout';
 import { CHALLENGES, HIGHLIGHTS, QUOTES, STORIES } from '@/lib/inspireData';
 import { moodMeta, toLocalDateKey, useMoodEntries } from '@/lib/moodStore';
@@ -35,6 +35,20 @@ function greeting(): string {
 }
 
 const EASE = [0.22, 1, 0.36, 1] as [number, number, number, number];
+
+/** Reactive media query — drives the peek layout and motion preferences. */
+function useMediaQuery(query: string): boolean {
+  const [matches, setMatches] = useState(() =>
+    typeof window !== 'undefined' ? window.matchMedia(query).matches : false,
+  );
+  useEffect(() => {
+    const mql = window.matchMedia(query);
+    const onChange = (e: MediaQueryListEvent) => setMatches(e.matches);
+    mql.addEventListener('change', onChange);
+    return () => mql.removeEventListener('change', onChange);
+  }, [query]);
+  return matches;
+}
 
 function CardShell({
   icon: Icon,
@@ -291,31 +305,61 @@ export default function InspireSection() {
   /* ---------- Carousel state ---------- */
 
   const [page, setPage] = useState(0);
-  const [slideDir, setSlideDir] = useState(1);
   const [held, setHeld] = useState(false);
+  const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const [paused, setPaused] = useState(false);
+  const swipeStartX = useRef<number | null>(null);
+  const swipedRef = useRef(false);
+  const isDesktop = useMediaQuery('(min-width: 768px)');
+  const prefersReducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
   const cardCount = cards.length;
   const safePage = Math.min(page, Math.max(0, cardCount - 1));
 
-  const goTo = (i: number) => {
-    setSlideDir(i > safePage ? 1 : -1);
-    setPage(i);
-  };
+  const goTo = (i: number) => setPage(i);
   const step = (delta: number) => {
     if (cardCount < 2) return;
-    setSlideDir(delta > 0 ? 1 : -1);
     setPage((safePage + delta + cardCount) % cardCount);
   };
 
-  // Auto-advance every 5s, looping. Manual navigation resets the timer;
-  // pressing and holding the carousel pauses it.
+  /**
+   * Autoplay — a slow 9-second drift so there's time to actually read.
+   * Pauses on hold, hover, keyboard focus, the manual pause control,
+   * and is disabled entirely for reduced-motion users.
+   */
+  const autoplayPaused =
+    held || hovered || focused || paused || prefersReducedMotion;
   useEffect(() => {
-    if (cardCount < 2 || held) return;
+    if (cardCount < 2 || autoplayPaused) return;
     const t = window.setInterval(() => {
-      setSlideDir(1);
       setPage((p) => (p + 1) % cardCount);
-    }, 5000);
+    }, 9000);
     return () => window.clearInterval(t);
-  }, [cardCount, safePage, held]);
+  }, [cardCount, safePage, autoplayPaused]);
+
+  /** Shortest wrapped offset of card i from the active page: -1, 0 or 1. */
+  const wrapOffset = (i: number): number => {
+    if (cardCount < 2) return 0;
+    let d = (i - safePage) % cardCount;
+    if (d > cardCount / 2) d -= cardCount;
+    if (d < -cardCount / 2) d += cardCount;
+    return d;
+  };
+
+  const onSwipeStart = (x: number) => {
+    swipeStartX.current = x;
+    setHeld(true);
+  };
+  const onSwipeEnd = (x: number | null) => {
+    setHeld(false);
+    if (swipeStartX.current === null || x === null) return;
+    const dx = x - swipeStartX.current;
+    swipeStartX.current = null;
+    if (Math.abs(dx) > 48) {
+      swipedRef.current = true;
+      step(dx < 0 ? 1 : -1);
+    }
+  };
 
   /** Where a click on each card leads (cards without a link are self-contained). */
   const CARD_LINKS: Partial<Record<CardId, string>> = {
@@ -378,33 +422,97 @@ export default function InspireSection() {
         </div>
       ) : (
         <div>
-          {/* Carousel — one gentle card at a time, compact fixed height so nothing jumps */}
+          {/*
+            Peek carousel — active card centered, neighbors peeking in on
+            desktop; one card at a time with swipe on mobile. Slides are
+            positioned absolutely and glide via `left` transitions.
+          */}
           <div
-            className="h-[232px] overflow-hidden"
-            onPointerDown={() => setHeld(true)}
-            onPointerUp={() => setHeld(false)}
-            onPointerLeave={() => setHeld(false)}
+            role="region"
+            aria-roledescription="carousel"
+            aria-label="Gentle inspiration"
+            tabIndex={0}
+            className="relative h-[248px] touch-pan-y overflow-hidden rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-haven-primary/40 sm:h-[240px]"
+            onMouseEnter={() => setHovered(true)}
+            onMouseLeave={() => setHovered(false)}
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
+            onKeyDown={(e) => {
+              if (e.key === 'ArrowLeft') {
+                e.preventDefault();
+                step(-1);
+              } else if (e.key === 'ArrowRight') {
+                e.preventDefault();
+                step(1);
+              }
+            }}
+            onPointerDown={(e) => onSwipeStart(e.clientX)}
+            onPointerUp={(e) => onSwipeEnd(e.clientX)}
+            onPointerCancel={() => onSwipeEnd(null)}
+            onPointerLeave={() => onSwipeEnd(null)}
           >
-            <AnimatePresence mode="wait" initial={false}>
-              <motion.div
-                key={cards[safePage].id}
-                className={cn('h-full', CARD_LINKS[cards[safePage].id] && 'cursor-pointer')}
-                initial={{ opacity: 0, x: slideDir * 56 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: slideDir * -56 }}
-                transition={{ duration: 0.28, ease: EASE }}
-                onClick={() => {
-                  const link = CARD_LINKS[cards[safePage].id];
-                  if (link) navigate(link);
-                }}
-              >
-                {cards[safePage].node}
-              </motion.div>
-            </AnimatePresence>
+            {cards.map((card, i) => {
+              const offset = wrapOffset(i);
+              const isActive = offset === 0;
+              const offscreen = Math.abs(offset) > 1;
+              // Desktop: active card is 78% wide, centered; neighbors peek ~9%.
+              // Mobile: full-width cards, one at a time.
+              const left = isDesktop ? 11 + offset * 80 : offset * 104;
+              return (
+                <div
+                  key={card.id}
+                  role="group"
+                  aria-roledescription="slide"
+                  aria-label={`${i + 1} of ${cardCount}`}
+                  aria-hidden={!isActive}
+                  className={cn('absolute top-0 h-full', offscreen && 'pointer-events-none')}
+                  onClick={() => {
+                    // Tapping a peeked neighbor glides it into focus.
+                    if (isActive || offscreen) return;
+                    if (swipedRef.current) {
+                      swipedRef.current = false;
+                      return;
+                    }
+                    goTo(i);
+                  }}
+                  style={{
+                    width: isDesktop ? '78%' : '100%',
+                    left: `${left}%`,
+                    opacity: offscreen ? 0 : isActive ? 1 : 0.45,
+                    transform: isActive ? 'scale(1)' : 'scale(0.97)',
+                    transition: prefersReducedMotion
+                      ? 'opacity 200ms ease'
+                      : 'left 480ms cubic-bezier(0.22, 1, 0.36, 1), opacity 480ms ease, transform 480ms cubic-bezier(0.22, 1, 0.36, 1)',
+                  }}
+                >
+                  <div
+                    className={cn(
+                      'h-full',
+                      !isActive && 'pointer-events-none',
+                      !offscreen && (isActive ? CARD_LINKS[card.id] && 'cursor-pointer' : 'cursor-pointer'),
+                    )}
+                    {...(!isActive ? { inert: '' as never } : {})}
+                    onClick={(e) => {
+                      // A drag shouldn't count as a tap.
+                      if (swipedRef.current) {
+                        swipedRef.current = false;
+                        return;
+                      }
+                      if (!isActive) return; // peeked cards are inert; handled below
+                      const link = CARD_LINKS[card.id];
+                      if (link) navigate(link);
+                      void e;
+                    }}
+                  >
+                    {card.node}
+                  </div>
+                </div>
+              );
+            })}
           </div>
 
           {cardCount > 1 && (
-            <div className="mt-3 flex items-center justify-center gap-3">
+            <div className="mt-3.5 flex items-center justify-center gap-3">
               <button
                 type="button"
                 onClick={() => step(-1)}
@@ -439,6 +547,21 @@ export default function InspireSection() {
               >
                 <ChevronRight size={16} strokeWidth={1.75} />
               </button>
+              {!prefersReducedMotion && (
+                <button
+                  type="button"
+                  onClick={() => setPaused((p) => !p)}
+                  aria-label={paused ? 'Resume automatic rotation' : 'Pause automatic rotation'}
+                  aria-pressed={paused}
+                  className="flex h-8 w-8 items-center justify-center rounded-full border border-haven-border bg-white text-haven-text-muted shadow-card transition-colors hover:border-haven-primary/40 hover:text-haven-primary"
+                >
+                  {paused ? (
+                    <Play size={13} strokeWidth={1.75} />
+                  ) : (
+                    <Pause size={13} strokeWidth={1.75} />
+                  )}
+                </button>
+              )}
             </div>
           )}
 

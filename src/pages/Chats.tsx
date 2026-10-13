@@ -22,6 +22,8 @@ interface Conversation {
   unread?: boolean;
   /** Pending chat request — must be accepted before chatting. */
   isRequest?: boolean;
+  /** Started as a request — early messages stay short (max 2 sentences each). */
+  wasRequest?: boolean;
   messages: Message[];
 }
 
@@ -118,6 +120,18 @@ const SEED_REQUESTS: Conversation[] = [
   },
 ];
 
+/** Count sentences — used to keep early request-chats small and gentle. */
+function countSentences(text: string): number {
+  const t = text.trim();
+  if (!t) return 0;
+  const ends = t.match(/[.!?…]+(?=\s|$)/g);
+  const closed = ends ? ends.length : 0;
+  // Text after the last closing mark still counts as a sentence in progress.
+  return /[.!?…]\s*$/.test(t) ? closed : closed + 1;
+}
+
+const MAX_REQUEST_SENTENCES = 2;
+
 /** Breathing online dot, isolated so the infinite loop never re-renders parents. */
 const OnlineDot = memo(function OnlineDot() {
   return (
@@ -199,7 +213,9 @@ export default function Chats() {
   }, [headerMenuOpen]);
 
   const acceptRequest = (id: string) => {
-    setConversations((prev) => prev.map((c) => (c.id === id ? { ...c, isRequest: false } : c)));
+    setConversations((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, isRequest: false, wasRequest: true } : c)),
+    );
     toast('Request accepted. Be gentle with each other. 💚');
   };
 
@@ -244,6 +260,10 @@ export default function Chats() {
   const send = () => {
     const text = draft.trim();
     if (!text || !active) return;
+    if (active.wasRequest && countSentences(text) > MAX_REQUEST_SENTENCES) {
+      toast('New chats start small — keep it to 2 sentences for now.');
+      return;
+    }
     const msg: Message = { id: `out-${Date.now()}`, dir: 'out', text };
     setConversations((prev) =>
       prev.map((c) =>
@@ -549,6 +569,7 @@ export default function Chats() {
                   Accept this request to start chatting.
                 </p>
               ) : (
+              <div>
               <div className="flex items-center gap-3">
                 <input
                   value={draft}
@@ -570,6 +591,13 @@ export default function Chats() {
                 >
                   <Send size={17} strokeWidth={1.75} />
                 </motion.button>
+              </div>
+              {active.wasRequest && (
+                <p className="mt-2 px-1 text-[12px] text-haven-text-muted">
+                  This chat just started — messages stay short ({MAX_REQUEST_SENTENCES} sentences max)
+                  while you both settle in.
+                </p>
+              )}
               </div>
               )}
             </div>
