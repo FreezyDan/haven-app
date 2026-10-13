@@ -133,8 +133,8 @@ export default function AudioJournal() {
           )}
         </button>
         <p className="text-[13px] text-haven-text-muted">
-          Don't feel like writing? Say it out loud. Your audio is saved only on this device — it is
-          never uploaded anywhere else.
+          Don't feel like writing? Say it out loud. Your recordings are private — only you can
+          listen to them.
         </p>
       </div>
 

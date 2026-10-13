@@ -32,7 +32,7 @@ const NAV_ITEMS = [
   { to: '/settings', label: 'Settings', icon: Settings },
 ];
 
-export default function Sidebar() {
+export default function Sidebar({ open = false, onClose }: { open?: boolean; onClose?: () => void }) {
   const { openCrisis, openCheckIn } = useHavenUi();
   const todayEntry = useMoodToday();
   const todayMeta = todayEntry ? moodMeta(todayEntry.mood) : null;
@@ -53,7 +53,28 @@ export default function Sidebar() {
   };
 
   return (
-    <aside className="fixed inset-y-0 left-0 z-50 flex w-[248px] flex-col bg-haven-sidebar px-4 py-5">
+    <>
+      {/* Mobile backdrop */}
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.25 }}
+            className="fixed inset-0 z-40 bg-haven-sidebar/40 backdrop-blur-sm lg:hidden"
+            onClick={onClose}
+            aria-hidden
+          />
+        )}
+      </AnimatePresence>
+      <aside
+        className={cn(
+          'fixed inset-y-0 left-0 z-50 flex w-[248px] flex-col bg-haven-sidebar px-4 py-5 transition-transform duration-300 ease-soft',
+          open ? 'translate-x-0' : '-translate-x-full',
+          'lg:translate-x-0',
+        )}
+      >
       {/* Logo */}
       <NavLink to="/" className="mb-5 flex items-center gap-2.5 px-2">
         <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-haven-primary font-serif text-base font-medium text-white">
@@ -67,7 +88,7 @@ export default function Sidebar() {
       {/* Nav */}
       <nav className="flex flex-col gap-0.5" aria-label="Main navigation">
         {NAV_ITEMS.map((item) => (
-          <NavLink key={item.to} to={item.to} end={item.end}>
+          <NavLink key={item.to} to={item.to} end={item.end} onClick={onClose}>
             {({ isActive }) => (
               <span
                 className={cn(
@@ -237,5 +258,6 @@ export default function Sidebar() {
         Crisis support
       </button>
     </aside>
+    </>
   );
 }

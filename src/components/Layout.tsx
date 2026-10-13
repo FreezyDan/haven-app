@@ -43,6 +43,12 @@ export default function Layout() {
 
   const ui = useMemo(() => ({ openCrisis, openCheckIn }), [openCrisis, openCheckIn]);
 
+  // Mobile navigation drawer
+  const [navOpen, setNavOpen] = useState(false);
+  useEffect(() => {
+    setNavOpen(false);
+  }, [location.pathname]);
+
   // User-chosen page backdrop — only the shell background, never component interiors.
   const [bg, setBg] = useState<BgChoice | null>(loadBg);
   useEffect(() => {
@@ -69,11 +75,11 @@ export default function Layout() {
   return (
     <HavenUiContext.Provider value={ui}>
       <div className="min-h-[100dvh] bg-haven-canvas" style={bgStyle}>
-        <Sidebar />
-        <div className="ml-[248px] flex min-h-[100dvh] flex-col">
-          <Topbar />
+        <Sidebar open={navOpen} onClose={() => setNavOpen(false)} />
+        <div className="flex min-h-[100dvh] flex-col lg:ml-[248px]">
+          <Topbar onMenuOpen={() => setNavOpen(true)} />
           <div className="flex flex-1 items-start">
-            <main className="flex-1 px-8 py-8">
+            <main className="flex-1 px-4 py-6 sm:px-8 sm:py-8">
               <AnimatePresence mode="wait" initial={false}>
                 <motion.div
                   key={location.pathname}

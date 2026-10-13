@@ -1,14 +1,22 @@
 import { Link, useLocation } from 'react-router';
-import { Bell, Search, Sprout } from 'lucide-react';
+import { Bell, Menu, Search, Sprout } from 'lucide-react';
 import { useMoodStreak } from '@/lib/moodStore';
 
-export default function Topbar() {
+export default function Topbar({ onMenuOpen }: { onMenuOpen?: () => void }) {
   const { pathname } = useLocation();
   const streak = useMoodStreak();
   const showStreak = pathname.startsWith('/mood') || pathname.startsWith('/journal');
 
   return (
-    <header className="sticky top-0 z-40 flex items-center gap-4 border-b border-haven-border bg-[#EEEEFC]/95 px-8 py-4 backdrop-blur">
+    <header className="sticky top-0 z-40 flex items-center gap-3 border-b border-haven-border bg-[#EEEEFC]/95 px-4 py-4 backdrop-blur sm:px-8">
+      <button
+        type="button"
+        onClick={onMenuOpen}
+        aria-label="Open navigation menu"
+        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-haven-border bg-white text-haven-text transition-colors hover:border-haven-primary/40 lg:hidden"
+      >
+        <Menu size={19} strokeWidth={1.75} />
+      </button>
       <Link to="/" className="flex flex-1 items-center gap-2.5" aria-label="Haven home">
         <img src="/logo.svg" alt="" className="h-7 w-7 rounded-lg" />
         <span className="font-serif text-[24px] font-semibold tracking-[-0.01em] text-haven-text">
