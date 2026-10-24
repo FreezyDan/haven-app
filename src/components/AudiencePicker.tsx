@@ -57,6 +57,9 @@ const COMMUNITIES = [
   'LGBTQ+ safe space',
   'Grief & loss circle',
   'Career changers',
+  'Loneliness & isolation',
+  'Healing from heartbreak',
+  'Starting over after failure',
 ];
 
 const joinOr = (items: string[]) =>
@@ -190,7 +193,7 @@ export default function AudiencePicker({ value, onChange }: AudiencePickerProps)
   return (
     <>
       {/* Trigger pill in the composer */}
-      <div className="mt-2 pl-[52px]">
+      <div className="mt-3">
         <button
           type="button"
           onClick={openModal}
@@ -231,7 +234,7 @@ export default function AudiencePicker({ value, onChange }: AudiencePickerProps)
               {/* Header */}
               <div className="flex items-start justify-between gap-3 border-b border-haven-border px-6 py-4">
                 <div>
-                  <h2 className="font-serif text-[22px] font-medium text-haven-text">
+                  <h2 className="text-[22px] font-medium text-haven-text">
                     Who can see this post?
                   </h2>
                   <p className="mt-0.5 text-[13px] text-haven-text-muted">
@@ -265,7 +268,7 @@ export default function AudiencePicker({ value, onChange }: AudiencePickerProps)
                       onClick={() => setDraft((d) => ({ ...d, mode }))}
                       aria-pressed={draft.mode === mode}
                       className={cn(
-                        'rounded-2xl border p-3 text-left transition-all duration-200 ease-soft',
+                        'rounded-xl border p-3 text-left transition-all duration-200 ease-soft',
                         draft.mode === mode
                           ? 'border-haven-primary/50 bg-haven-primary-soft'
                           : 'border-haven-border bg-white hover:bg-haven-canvas',
@@ -445,7 +448,7 @@ export default function AudiencePicker({ value, onChange }: AudiencePickerProps)
                 )}
 
                 {/* 3. Live summary + preview */}
-                <div className="mt-5 rounded-2xl bg-haven-primary-soft px-4 py-3">
+                <div className="mt-5 rounded-xl bg-haven-primary-soft px-4 py-3">
                   <p className="text-[13px] font-medium leading-relaxed text-haven-text">
                     {audienceSummary(draft)}
                   </p>

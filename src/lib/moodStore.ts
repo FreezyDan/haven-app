@@ -1,4 +1,7 @@
-import { useSyncExternalStore } from 'react';
+import { useEffect, useMemo } from 'react';
+import { toast } from 'sonner';
+import { trpc } from '@/providers/trpc';
+import { getAccessToken } from '@/lib/supabase';
 
 export type MoodValue = 'great' | 'good' | 'okay' | 'low' | 'struggling';
 
@@ -11,7 +14,6 @@ export interface MoodEntry {
 
 export type MoodEntryMap = Record<string, MoodEntry>;
 
-const STORAGE_KEY = 'haven.moodEntries';
 const CHANGE_EVENT = 'haven:mood-entries-changed';
 
 export const MOODS: {
@@ -59,83 +61,9 @@ function shiftKey(key: string, days: number): string {
   return toLocalDateKey(d);
 }
 
-function readRaw(): MoodEntryMap {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as MoodEntryMap;
-    return parsed && typeof parsed === 'object' ? parsed : {};
-  } catch {
-    return {};
-  }
-}
+/* ------------------------- derived pure helpers ------------------------- */
 
-function writeRaw(map: MoodEntryMap) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(map));
-  window.dispatchEvent(new CustomEvent(CHANGE_EVENT));
-}
-
-// ---- Demo seed (~3 weeks of realistic entries) ----
-function seedIfEmpty() {
-  if (typeof localStorage === 'undefined') return;
-  if (localStorage.getItem(STORAGE_KEY)) return;
-  const pattern: [MoodValue, string?][] = [
-    ['okay', 'Slow morning, but I got out of bed. That counts.'],
-    ['good', 'Walked around the block. Sun helped.'],
-    ['low', 'Anxious about nothing specific. Chest felt tight.'],
-    ['okay'],
-    ['great', 'Called an old friend. Laughed a lot.'],
-    ['good'],
-    ['low', 'Skipped lunch. Trying not to spiral.'],
-    ['struggling', 'Everything felt heavy today. Just survived it.'],
-    ['low', 'Better than yesterday, still anxious.'],
-    ['okay', 'Neutral day. Neutral is fine.'],
-    ['good', 'Cooked an actual meal. Small win.'],
-    ['okay'],
-    ['great', 'Therapy went really well today.'],
-    ['good', 'Slept 7 hours!'],
-    ['okay', 'A bit flat, but calm.'],
-    ['low', 'Sunday scaries hit hard.'],
-    ['okay'],
-    ['good', 'Morning pages helped clear my head.'],
-    ['okay'],
-    ['low', 'Quiet day. A little lonely.'],
-  ];
-  const map: MoodEntryMap = {};
-  const today = new Date();
-  pattern.forEach(([mood, note], i) => {
-    const d = new Date(today);
-    d.setDate(d.getDate() - (pattern.length - i)); // last pattern day = yesterday
-    const date = toLocalDateKey(d);
-    map[date] = { date, mood, note, updatedAt: d.getTime() };
-  });
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(map));
-}
-
-export function getEntries(): MoodEntryMap {
-  seedIfEmpty();
-  return readRaw();
-}
-
-export function saveCheckIn(date: string, mood: MoodValue, note?: string): MoodEntry {
-  const entries = getEntries();
-  const entry: MoodEntry = {
-    date,
-    mood,
-    ...(note?.trim() ? { note: note.trim().slice(0, 280) } : {}),
-    updatedAt: Date.now(),
-  };
-  writeRaw({ ...entries, [date]: entry });
-  return entry;
-}
-
-export function getTodayEntry(): MoodEntry | undefined {
-  return getEntries()[todayKey()];
-}
-
-/** Consecutive days up to today (or yesterday if today has no entry) with any entry. */
-export function getStreak(): number {
-  const entries = getEntries();
+export function streakFrom(entries: MoodEntryMap): number {
   let cursor = todayKey();
   if (!entries[cursor]) cursor = shiftKey(cursor, -1);
   let streak = 0;
@@ -146,12 +74,7 @@ export function getStreak(): number {
   return streak;
 }
 
-/**
- * Count of most recent consecutive calendar days with logged low moods
- * (low / struggling). Stops at the first logged non-low day or missing day.
- */
-export function getConsecutiveLowDays(): number {
-  const entries = getEntries();
+export function consecutiveLowDaysFrom(entries: MoodEntryMap): number {
   let cursor = todayKey();
   if (!entries[cursor]) cursor = shiftKey(cursor, -1);
   let count = 0;
@@ -162,18 +85,15 @@ export function getConsecutiveLowDays(): number {
   return count;
 }
 
-export function needsExtraCare(): boolean {
-  return getConsecutiveLowDays() >= 3;
-}
-
-export function getMoodStats(days: number): { total: number; average: number; distribution: Record<MoodValue, number> } {
-  const entries = getEntries();
+export function moodStatsFrom(
+  entries: MoodEntryMap,
+  days: number,
+): { total: number; average: number; distribution: Record<MoodValue, number> } {
   const distribution: Record<MoodValue, number> = { great: 0, good: 0, okay: 0, low: 0, struggling: 0 };
   let sum = 0;
   let total = 0;
   for (let i = 0; i < days; i++) {
-    const key = shiftKey(todayKey(), -i);
-    const e = entries[key];
+    const e = entries[shiftKey(todayKey(), -i)];
     if (e) {
       distribution[e.mood] += 1;
       sum += moodMeta(e.mood).score;
@@ -183,31 +103,40 @@ export function getMoodStats(days: number): { total: number; average: number; di
   return { total, average: total ? sum / total : 0, distribution };
 }
 
-// ---- React binding ----
-function subscribe(callback: () => void) {
-  window.addEventListener(CHANGE_EVENT, callback);
-  window.addEventListener('storage', callback);
-  return () => {
-    window.removeEventListener(CHANGE_EVENT, callback);
-    window.removeEventListener('storage', callback);
-  };
-}
+/* ------------------------- server-backed storage ------------------------ */
+/* Mood check-ins live in the database (private to the account) — they      */
+/* survive refreshes, devices, and browser clears.                          */
 
-let cachedRaw: string | null = null;
-let cachedMap: MoodEntryMap = {};
+type MoodRow = { date: string; mood: string; note: string | null; createdAt: string | Date };
 
-function getSnapshot(): MoodEntryMap {
-  seedIfEmpty();
-  const raw = localStorage.getItem(STORAGE_KEY);
-  if (raw !== cachedRaw) {
-    cachedRaw = raw;
-    cachedMap = readRaw();
+function toMap(rows: MoodRow[] | undefined): MoodEntryMap {
+  const map: MoodEntryMap = {};
+  for (const r of rows ?? []) {
+    if (!MOODS.some((m) => m.value === r.mood)) continue;
+    map[r.date] = {
+      date: r.date,
+      mood: r.mood as MoodValue,
+      ...(r.note ? { note: r.note } : {}),
+      updatedAt: new Date(r.createdAt).getTime(),
+    };
   }
-  return cachedMap;
+  return map;
 }
 
 export function useMoodEntries(): MoodEntryMap {
-  return useSyncExternalStore(subscribe, getSnapshot);
+  const utils = trpc.useUtils();
+  const query = trpc.mood.list.useQuery(undefined, {
+    staleTime: 10_000,
+    retry: false,
+  });
+  useEffect(() => {
+    const handler = () => {
+      utils.mood.list.invalidate();
+    };
+    window.addEventListener(CHANGE_EVENT, handler);
+    return () => window.removeEventListener(CHANGE_EVENT, handler);
+  }, [utils]);
+  return useMemo(() => toMap(query.data), [query.data]);
 }
 
 export function useMoodToday(): MoodEntry | undefined {
@@ -216,11 +145,40 @@ export function useMoodToday(): MoodEntry | undefined {
 }
 
 export function useMoodStreak(): number {
-  useMoodEntries();
-  return getStreak();
+  const entries = useMoodEntries();
+  return useMemo(() => streakFrom(entries), [entries]);
 }
 
 export function useNeedsExtraCare(): boolean {
-  useMoodEntries();
-  return needsExtraCare();
+  const entries = useMoodEntries();
+  return useMemo(() => consecutiveLowDaysFrom(entries) >= 3, [entries]);
+}
+
+/**
+ * Saves a check-in to the server (upsert — one per day per user).
+ * Async; fire-and-forget friendly. Returns false when signed out.
+ */
+export function saveCheckIn(date: string, mood: MoodValue, note?: string): void {
+  void (async () => {
+    const token = await getAccessToken();
+    if (!token) {
+      toast.error('Sign in to save your check-in.');
+      return;
+    }
+    const res = await fetch('/api/trpc/mood.checkIn', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        json: { date, mood, ...(note?.trim() ? { note: note.trim().slice(0, 280) } : {}) },
+      }),
+    });
+    if (!res.ok) {
+      toast.error("Couldn't save your check-in. Please try again.");
+      return;
+    }
+    window.dispatchEvent(new CustomEvent(CHANGE_EVENT));
+  })();
 }

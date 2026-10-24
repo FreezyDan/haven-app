@@ -170,7 +170,7 @@ export default function BlogArticle() {
   if (!article) {
     return (
       <div className="mx-auto w-full max-w-3xl px-4 pb-16 pt-8">
-        <div className="rounded-2xl border border-[#E7E7F0] bg-white p-8 text-center">
+        <div className="rounded-xl border border-[#E7E7F0] bg-white p-8 text-center">
           <p className="font-[Fraunces,serif] text-xl text-[#23223A]">We couldn't find that article.</p>
           <p className="mt-1 text-sm text-[#6E6E88]">It may have been moved — but there's plenty of warmth waiting on the resources page.</p>
           <Link
@@ -200,7 +200,7 @@ export default function BlogArticle() {
       </Link>
 
       {/* Hero */}
-      <div className="overflow-hidden rounded-2xl">
+      <div className="overflow-hidden rounded-xl">
         <img
           src={article.cover}
           alt=""
@@ -323,7 +323,7 @@ export default function BlogArticle() {
 
       {/* Crisis footer (Crisis education articles) */}
       {article.crisisFooter && (
-        <div className="mt-8 rounded-2xl border-l-[3px] border-[#A33B32] bg-[#FBEAE8] p-5">
+        <div className="mt-8 rounded-xl border-l-[3px] border-[#A33B32] bg-[#FBEAE8] p-5">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <p className="flex items-center gap-2 text-[15px] font-semibold text-[#A33B32]">
@@ -354,7 +354,7 @@ export default function BlogArticle() {
             <Link
               key={a.slug}
               to={`/blogs/${a.slug}`}
-              className="group flex gap-4 rounded-2xl border border-[#E7E7F0] bg-white p-3 shadow-[0_1px_3px_rgba(36,35,90,0.06)] transition-all duration-300 hover:-translate-y-[2px] hover:shadow-[0_8px_20px_rgba(36,35,90,0.1)]"
+              className="group flex gap-4 rounded-xl border border-[#E7E7F0] bg-white p-3 shadow-[0_1px_3px_rgba(36,35,90,0.06)] transition-all duration-300 hover:-translate-y-[2px] hover:shadow-[0_8px_20px_rgba(36,35,90,0.1)]"
             >
               <img src={a.cover} alt="" className="h-20 w-28 shrink-0 rounded-xl object-cover" />
               <div className="min-w-0">

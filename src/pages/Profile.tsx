@@ -1,14 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Link } from 'react-router';
-import { BookOpen, CalendarCheck, Check, Eye, EyeOff, ImagePlus, Lock, ShieldCheck, Star, X } from 'lucide-react';
+import { Link, useNavigate } from 'react-router';
+import { toast } from 'sonner';
+import {
+  BookOpen,
+  CalendarCheck,
+  Eye,
+  EyeOff,
+  Lock,
+  ShieldCheck,
+  Star,
+  X,
+} from 'lucide-react';
+import { trpc } from '@/providers/trpc';
+import { useAuth } from '@/hooks/useAuth';
+import { usePosts } from '@/lib/havenData';
 import HugIcon from '@/components/HugIcon';
 import PostCard, { readImageFile, type Post } from '@/components/PostCard';
-import AudiencePicker, {
-  DEFAULT_AUDIENCE,
-  audienceLabels,
-  type AudienceSelection,
-} from '@/components/AudiencePicker';
+import LetItOutComposer, { type LetItOutSubmit } from '@/components/LetItOutComposer';
+import { audienceLabels } from '@/components/AudiencePicker';
 import MoodChip from '@/components/MoodChip';
 import {
   moodMeta,
@@ -16,100 +26,11 @@ import {
   useMoodEntries,
   useMoodStreak,
   useNeedsExtraCare,
-  type MoodValue,
 } from '@/lib/moodStore';
-import { formatEntryDate, loadJournalEntries } from '@/components/wellness/journalStore';
+import { formatEntryDate, toUiJournalEntry, type JournalRow } from '@/components/wellness/journalStore';
 import { cn } from '@/lib/utils';
 
-// ---- Local-only profile data ----
-
-interface ProfileData {
-  name: string;
-  pseudonym: string;
-  bio: string;
-  avatarColor: string;
-}
-
-const PROFILE_KEY = 'haven.profile';
-const STATS_KEY = 'haven.profileStats';
-const USER_POSTS_KEY = 'haven.userPosts';
-const SAVED_POSTS_KEY = 'haven.savedPosts';
-
 const AVATAR_COLORS = ['#8B7BC7', '#5BA88A', '#E0A983', '#7FA8C9', '#C98BA0', '#6E6CF0'];
-
-const DEFAULT_PROFILE: ProfileData = {
-  name: 'Maya',
-  pseudonym: 'Quiet fox',
-  bio: 'Learning to be gentle with myself. Here for the heavy days and the good ones. 🌱',
-  avatarColor: '#8B7BC7',
-};
-
-function loadProfile(): ProfileData {
-  try {
-    const raw = localStorage.getItem(PROFILE_KEY);
-    if (!raw) return DEFAULT_PROFILE;
-    return { ...DEFAULT_PROFILE, ...(JSON.parse(raw) as Partial<ProfileData>) };
-  } catch {
-    return DEFAULT_PROFILE;
-  }
-}
-
-function loadHugStats(): { received: number; given: number } {
-  try {
-    const raw = localStorage.getItem(STATS_KEY);
-    if (raw) return JSON.parse(raw) as { received: number; given: number };
-    const seeded = { received: 48, given: 63 };
-    localStorage.setItem(STATS_KEY, JSON.stringify(seeded));
-    return seeded;
-  } catch {
-    return { received: 48, given: 63 };
-  }
-}
-
-const FALLBACK_USER_POSTS: Post[] = [
-  {
-    id: 'profile-seed-small-win',
-    author: 'Quiet fox',
-    avatarColor: '#5BA88A',
-    time: '2d ago',
-    moodChip: { label: 'Hopeful', bg: '#E4F2EA', text: '#2E7D5B' },
-    title: 'Small win today',
-    body: 'I made it to my appointment even though every part of me wanted to cancel. Sat in the waiting room shaking a little, but I stayed. Sharing here because I know you all get it.',
-    hugs: 34,
-    replies: 9,
-  },
-  {
-    id: 'profile-seed-heavy-days',
-    author: 'Quiet fox',
-    avatarColor: '#5BA88A',
-    time: '5d ago',
-    moodChip: { label: 'Feeling heavy', bg: '#F7DDDA', text: '#A33B32' },
-    title: 'Some days are just heavy.',
-    body: 'No reason, no trigger I can find. Just heavy. Not looking for advice — mostly wanted to say it out loud somewhere safe. Thanks for being here.',
-    hugs: 12,
-    replies: 6,
-  },
-];
-
-function loadUserPosts(): Post[] {
-  try {
-    const raw = localStorage.getItem(USER_POSTS_KEY);
-    const stored = raw ? (JSON.parse(raw) as Post[]) : [];
-    if (Array.isArray(stored) && stored.length) return stored;
-  } catch {
-    /* fall through */
-  }
-  return FALLBACK_USER_POSTS;
-}
-
-function loadSavedPosts(all: Post[]): Post[] {
-  try {
-    const ids = JSON.parse(localStorage.getItem(SAVED_POSTS_KEY) ?? '[]') as string[];
-    return all.filter((p) => ids.includes(p.id));
-  } catch {
-    return [];
-  }
-}
 
 /** Count-up number (ease-out, ~800ms). */
 function CountUp({ value }: { value: number }) {
@@ -135,38 +56,88 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'highlights', label: 'Journal highlights' },
 ];
 
-const COMPOSER_MOODS: { label: string; mood: MoodValue }[] = [
-  { label: 'Feeling heavy', mood: 'struggling' },
-  { label: 'Anxious', mood: 'low' },
-  { label: 'Hopeful', mood: 'good' },
-  { label: 'Calm', mood: 'okay' },
-];
+interface ProfileDraft {
+  displayName: string;
+  pseudonym: string;
+  bio: string;
+  avatarColor: string;
+  avatarUrl: string | null;
+  coverImage: string | null;
+}
 
 export default function Profile() {
   const entries = useMoodEntries();
   const streak = useMoodStreak();
   const extraCare = useNeedsExtraCare();
 
-  const [profile, setProfile] = useState<ProfileData>(loadProfile);
-  const [hugStats] = useState(loadHugStats);
-  const [journalEntries] = useState(loadJournalEntries);
+  const { isAuthenticated } = useAuth();
+  const navigate = useNavigate();
+  const utils = trpc.useUtils();
+
+  // Real profile from the database — no preset/demo identity.
+  const profileQ = trpc.profile.get.useQuery(undefined, { retry: 1 });
+  const profile = profileQ.data ?? null;
+  const statsQ = trpc.profile.stats.useQuery(undefined, { retry: 1 });
+  const journalQ = trpc.journal.list.useQuery(undefined, { retry: 1 });
+
   const [tab, setTab] = useState<Tab>('posts');
   const [editOpen, setEditOpen] = useState(false);
-  const [draft, setDraft] = useState<ProfileData>(profile);
+  const [draft, setDraft] = useState<ProfileDraft | null>(null);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
+  const coverInputRef = useRef<HTMLInputElement>(null);
 
-  const [userPosts, setUserPosts] = useState<Post[]>(loadUserPosts);
+  const { posts: apiPosts, isLoading: postsLoading } = usePosts();
+  const userPosts = useMemo(() => apiPosts.filter((p) => p.mine), [apiPosts]);
+  const savedPosts = useMemo(() => apiPosts.filter((p) => p.saved), [apiPosts]);
   const [hideMetrics, setHideMetrics] = useState(
     () => localStorage.getItem('haven.profileHideMetrics') === '1',
   );
-  const [postDraft, setPostDraft] = useState('');
-  const [postChip, setPostChip] = useState<string | null>(null);
-  const [postImage, setPostImage] = useState<string | null>(null);
-  const [postAudience, setPostAudience] = useState<AudienceSelection>(DEFAULT_AUDIENCE);
-  const [justShared, setJustShared] = useState(false);
-  const postImageInputRef = useRef<HTMLInputElement>(null);
-  const postTextareaRef = useRef<HTMLTextAreaElement>(null);
-  const savedPosts = useMemo(() => loadSavedPosts(userPosts), [userPosts]);
+  const journalEntries = useMemo(
+    () => (journalQ.data ?? []).map((r) => toUiJournalEntry(r as JournalRow)),
+    [journalQ.data],
+  );
   const highlights = useMemo(() => journalEntries.filter((e) => e.starred), [journalEntries]);
+
+  const needAuth = () =>
+    toast('Sign in to do that.', {
+      action: { label: 'Sign in', onClick: () => navigate('/login') },
+    });
+
+  const updateProfileMutation = trpc.settings.updateProfile.useMutation({
+    onSuccess: () => {
+      utils.profile.get.invalidate();
+      utils.publicProfile.byUsername.invalidate();
+      setEditOpen(false);
+      toast('Profile updated.');
+    },
+    onError: (err) => {
+      if (err.data?.code === 'UNAUTHORIZED') needAuth();
+      else toast('Your changes could not be saved — please try again.');
+    },
+  });
+  const shareMutation = trpc.post.create.useMutation({
+    onSuccess: () => {
+      utils.post.list.invalidate();
+      utils.profile.stats.invalidate();
+      setTab('posts');
+      toast('Shared — thank you for letting it out.');
+    },
+    onError: (err) => {
+      if (err.data?.code === 'UNAUTHORIZED') needAuth();
+      else toast('Your post could not be shared — please try again.');
+    },
+  });
+  const updateMutation = trpc.post.update.useMutation({
+    onSuccess: () => utils.post.list.invalidate(),
+    onError: () => toast('That change did not save — please try again.'),
+  });
+  const deleteMutation = trpc.post.delete.useMutation({
+    onSuccess: () => {
+      utils.post.list.invalidate();
+      utils.profile.stats.invalidate();
+    },
+    onError: () => toast('The post could not be deleted — please try again.'),
+  });
 
   const checkInsThisMonth = useMemo(() => {
     const now = new Date();
@@ -187,77 +158,133 @@ export default function Profile() {
 
   const stats = [
     { label: 'Days journaled', value: journalEntries.length, icon: BookOpen, color: '#6E6CF0' },
-    { label: 'Hugs given', value: hugStats.given, icon: HugIcon, color: '#6E6CF0' },
-    { label: 'Check-ins this month', value: checkInsThisMonth, icon: CalendarCheck, color: '#6E6CF0' },
+    { label: 'Hugs received', value: statsQ.data?.hugsReceived ?? 0, icon: HugIcon, color: '#6E6CF0' },
+    { label: 'Hugs given', value: statsQ.data?.hugsGiven ?? 0, icon: HugIcon, color: '#6E6CF0' },
+    {
+      label: 'Check-ins this month',
+      value: checkInsThisMonth,
+      icon: CalendarCheck,
+      color: '#6E6CF0',
+    },
   ];
 
+  const openEditor = () => {
+    if (!profile) return;
+    setDraft({
+      displayName: profile.displayName ?? '',
+      pseudonym: profile.pseudonym ?? '',
+      bio: profile.bio ?? '',
+      avatarColor: profile.avatarColor ?? '#8B7BC7',
+      avatarUrl: profile.avatarUrl ?? null,
+      coverImage: profile.coverImage ?? null,
+    });
+    setEditOpen(true);
+  };
+
   const saveProfile = () => {
-    setProfile(draft);
-    localStorage.setItem(PROFILE_KEY, JSON.stringify(draft));
-    setEditOpen(false);
-  };
-
-  const sharePost = () => {
-    const body = postDraft.trim();
-    if (!body && !postImage) return;
-    const chipDef = COMPOSER_MOODS.find((c) => c.label === postChip);
-    const meta = chipDef ? moodMeta(chipDef.mood) : null;
-    const firstLine = body.split('\n')[0];
-    const post: Post = {
-      id: `user-${Date.now()}`,
-      author: profile.pseudonym || profile.name || 'Me',
-      avatarColor: profile.avatarColor,
-      time: 'now',
-      moodChip: postChip && meta ? { label: postChip, bg: meta.chipBg, text: meta.chipText } : undefined,
-      title: firstLine.length > 60 ? `${firstLine.slice(0, 60)}…` : firstLine || 'A quiet share',
-      body,
-      ...(postImage ? { image: postImage } : {}),
-      ...(audienceLabels(postAudience).length ? { audience: audienceLabels(postAudience) } : {}),
-      hugs: 0,
-      replies: 0,
-    };
-    const next = [post, ...userPosts];
-    setUserPosts(next);
-    try {
-      localStorage.setItem(USER_POSTS_KEY, JSON.stringify(next));
-    } catch {
-      /* image too large to persist — post stays for this session */
+    if (!draft) return;
+    const displayName = draft.displayName.trim();
+    if (!displayName) {
+      toast('A display name is required.');
+      return;
     }
-    setPostDraft('');
-    setPostChip(null);
-    setPostImage(null);
-    setPostAudience(DEFAULT_AUDIENCE);
-    setJustShared(true);
-    setTab('posts');
-    if (postTextareaRef.current) postTextareaRef.current.style.height = 'auto';
-    window.setTimeout(() => setJustShared(false), 2600);
-  };
-
-  const autoGrowPost = () => {
-    const el = postTextareaRef.current;
-    if (!el) return;
-    el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
-  };
-
-  const pickPostImage = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file) return;
-    readImageFile(file, (dataUrl) => setPostImage(dataUrl));
-  };
-
-  const updatePost = (id: string, patch: Partial<Post>) => {
-    setUserPosts((prev) => {
-      const next = prev.map((p) => (p.id === id ? { ...p, ...patch } : p));
-      try {
-        localStorage.setItem(USER_POSTS_KEY, JSON.stringify(next));
-      } catch {
-        /* ignore */
-      }
-      return next;
+    updateProfileMutation.mutate({
+      displayName,
+      ...(draft.pseudonym.trim() ? { pseudonym: draft.pseudonym.trim() } : {}),
+      bio: draft.bio.trim(),
+      avatarColor: draft.avatarColor,
+      avatarUrl: draft.avatarUrl,
+      coverImage: draft.coverImage,
     });
   };
+
+  const handleComposerSubmit = (payload: LetItOutSubmit) => {
+    const body = payload.body.trim();
+    if (!body) return;
+    if (!isAuthenticated) return needAuth();
+    const firstLine = body.split('\n')[0];
+    shareMutation.mutate({
+      title:
+        payload.title ??
+        (firstLine.length > 60 ? `${firstLine.slice(0, 60)}…` : firstLine || 'A quiet share'),
+      body,
+      ...(payload.emotions.length ? { emotions: payload.emotions } : {}),
+      ...(payload.supportPreference ? { supportPreference: payload.supportPreference } : {}),
+      ...(audienceLabels(payload.audience).length ? { audience: audienceLabels(payload.audience) } : {}),
+      ...(payload.image ? { image: payload.image } : {}),
+    });
+  };
+
+  const pickDraftImage =
+    (apply: (dataUrl: string) => void) => (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      e.target.value = '';
+      if (!file) return;
+      readImageFile(file, apply);
+    };
+
+  const updatePost = (id: string, patch: Partial<Post>) => {
+    const target = apiPosts.find((p) => p.id === id);
+    if (target?.dbId == null) return;
+    updateMutation.mutate({
+      id: target.dbId,
+      // Key presence matters, not the value: PostCard passes `undefined`
+      // to mean "clear this field", and that must still reach the server.
+      ...('emotions' in patch ? { emotions: patch.emotions ?? [] } : {}),
+      ...('supportPreference' in patch
+        ? { supportPreference: patch.supportPreference ?? null }
+        : {}),
+      ...('image' in patch ? { image: patch.image ?? null } : {}),
+    });
+  };
+
+  const deletePost = (id: string) => {
+    const target = apiPosts.find((p) => p.id === id);
+    if (target?.mine && target.dbId != null) {
+      deleteMutation.mutate({ id: target.dbId });
+      toast('Post deleted. Take care of yourself.');
+    }
+  };
+
+  if (profileQ.isLoading) {
+    return (
+      <div className="mx-auto w-full max-w-2xl space-y-6">
+        <div className="animate-pulse">
+          <div className="h-40 rounded-xl bg-haven-border/40" />
+          <div className="mt-4 h-5 w-40 rounded bg-haven-border/50" />
+          <div className="mt-2 h-3 w-64 rounded bg-haven-border/40" />
+        </div>
+        <div className="grid grid-cols-3 gap-4">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="h-24 animate-pulse rounded-xl bg-haven-border/30" />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (!profile) {
+    return (
+      <div className="mx-auto w-full max-w-2xl rounded-xl border border-haven-border bg-white p-10 text-center shadow-card">
+        <p className="text-xl font-medium text-haven-text">
+          We couldn't load your profile.
+        </p>
+        <p className="mt-1 text-sm text-haven-text-muted">Check your connection and try again.</p>
+        <button
+          type="button"
+          onClick={() => profileQ.refetch()}
+          className="mt-4 rounded-full bg-haven-primary px-5 py-2 text-sm font-semibold text-white hover:bg-haven-primary-hover"
+        >
+          Try again
+        </button>
+      </div>
+    );
+  }
+
+  const displayName = profile.pseudonym ?? profile.displayName ?? 'Me';
+  const pseudonym = profile.pseudonym ?? displayName;
+  const avatarColor = profile.avatarColor ?? '#8B7BC7';
+  const initial = displayName.charAt(0).toUpperCase();
 
   return (
     <div className="mx-auto w-full max-w-2xl space-y-6">
@@ -267,42 +294,63 @@ export default function Profile() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
       >
-        <motion.div
-          className="h-40 rounded-2xl"
-          style={{
-            backgroundImage: 'linear-gradient(120deg, #8786FF 0%, #A78BFA 55%, #7BA7F0 100%)',
-            backgroundSize: '200% 200%',
-          }}
-          animate={{ backgroundPosition: ['0% 50%', '100% 50%', '0% 50%'] }}
-          transition={{ duration: 20, repeat: Infinity, ease: 'linear' }}
-        />
+        {profile.coverImage ? (
+          <img
+            src={profile.coverImage}
+            alt=""
+            className="h-40 w-full rounded-xl object-cover"
+          />
+        ) : (
+          <motion.div
+            className="h-40 rounded-xl"
+            style={{
+              backgroundImage: 'linear-gradient(120deg, #8786FF 0%, #A78BFA 55%, #7BA7F0 100%)',
+              backgroundSize: '200% 200%',
+            }}
+            animate={{ backgroundPosition: ['0% 50%', '100% 50%', '0% 50%'] }}
+            transition={{ duration: 20, repeat: Infinity, ease: 'linear' }}
+          />
+        )}
         <div className="px-2">
           <div className="flex items-end justify-between">
-            <span
-              className="-mt-10 flex h-20 w-20 items-center justify-center rounded-full text-2xl font-semibold text-white ring-4 ring-haven-canvas"
-              style={{ backgroundColor: profile.avatarColor }}
-              aria-hidden
-            >
-              {profile.name.charAt(0).toUpperCase()}
-            </span>
+            {profile.avatarUrl ? (
+              <img
+                src={profile.avatarUrl}
+                alt=""
+                className="-mt-10 h-20 w-20 rounded-full object-cover ring-4 ring-haven-canvas"
+              />
+            ) : (
+              <span
+                className="-mt-10 flex h-20 w-20 items-center justify-center rounded-full text-2xl font-semibold text-white ring-4 ring-haven-canvas"
+                style={{ backgroundColor: avatarColor }}
+                aria-hidden
+              >
+                {initial}
+              </span>
+            )}
             <button
               type="button"
-              onClick={() => {
-                setDraft(profile);
-                setEditOpen(true);
-              }}
+              onClick={openEditor}
               className="rounded-full border border-haven-border bg-white px-5 py-2 text-sm font-semibold text-haven-text transition-colors hover:border-haven-primary/40 hover:text-haven-primary"
             >
               Edit profile
             </button>
           </div>
-          <h1 className="mt-3 text-[22px] font-semibold text-haven-text">{profile.name}</h1>
+          <h1 className="mt-3 text-[22px] font-semibold text-haven-text">{displayName}</h1>
           <p className="text-[13px] text-haven-text-muted">
-            also known as <span className="italic">{profile.pseudonym}</span>
+            {profile.username ? (
+              <>
+                @{profile.username}
+                {' · '}
+              </>
+            ) : null}
+            also known as <span className="italic">{pseudonym}</span>
           </p>
-          <p className="mt-2 line-clamp-2 text-sm leading-[1.6] text-haven-text/90">
-            {profile.bio}
-          </p>
+          {profile.bio ? (
+            <p className="mt-2 line-clamp-2 text-sm leading-[1.6] text-haven-text/90">
+              {profile.bio}
+            </p>
+          ) : null}
         </div>
       </motion.section>
 
@@ -330,19 +378,19 @@ export default function Profile() {
           </button>
         </div>
         {hideMetrics ? (
-          <p className="rounded-2xl border border-haven-border bg-white px-6 py-8 text-center text-sm text-haven-text-muted shadow-card">
+          <p className="rounded-xl border border-haven-border bg-white px-6 py-8 text-center text-sm text-haven-text-muted shadow-card">
             Your numbers are tucked away. They're here whenever you want them — no pressure either way.
           </p>
         ) : (
           <>
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
               {stats.map((stat, i) => (
                 <motion.div
                   key={stat.label}
                   initial={{ opacity: 0, y: 14 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.35, delay: i * 0.06, ease: [0.22, 1, 0.36, 1] }}
-                  className="rounded-2xl border border-haven-border bg-white p-4 shadow-card"
+                  className="rounded-xl border border-haven-border bg-white p-4 shadow-card"
                 >
                   <stat.icon size={18} strokeWidth={1.75} style={{ color: stat.color }} />
                   <p className="mt-2 text-[26px] font-semibold leading-none text-haven-primary">
@@ -364,7 +412,7 @@ export default function Profile() {
         initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.35, delay: 0.15, ease: [0.22, 1, 0.36, 1] }}
-        className="rounded-2xl border border-haven-border bg-white p-5 shadow-card"
+        className="rounded-xl border border-haven-border bg-white p-5 shadow-card"
       >
         <div className="flex items-center justify-between gap-3">
           <p className="text-sm font-semibold text-haven-text">Your last 7 days</p>
@@ -414,128 +462,24 @@ export default function Profile() {
         )}
       </motion.section>
 
-      {/* 4. Composer — mirrors the Home "Let it out" card */}
+      {/* 4. Composer — the shared "Let it out" card */}
       <section>
         <h2 className="mb-3 text-[20px] font-bold text-haven-text">Let it out</h2>
-        <motion.section
+        <motion.div
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.35, delay: 0.2, ease: [0.22, 1, 0.36, 1] }}
-          className="rounded-2xl border border-haven-border bg-white p-5 shadow-card transition-shadow duration-200 focus-within:shadow-card-hover"
         >
-          <div className="flex gap-3">
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#8B7BC7] text-sm font-semibold text-white">
-              M
-            </span>
-            <textarea
-              ref={postTextareaRef}
-              value={postDraft}
-              onChange={(e) => {
-                setPostDraft(e.target.value);
-                autoGrowPost();
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  sharePost();
-                }
-              }}
-              rows={2}
-              placeholder="How are you feeling today? It's okay to not be okay…"
-              className="w-full resize-none rounded-xl border border-haven-border bg-haven-canvas px-3 py-2 text-[15px] leading-relaxed text-haven-text transition-colors duration-200 placeholder:text-haven-text-muted/70 focus:outline-none focus:ring-2 focus:ring-haven-primary/40"
-            />
-          </div>
-          <div className="mt-3 flex flex-wrap items-center gap-2 pl-[52px]">
-            {COMPOSER_MOODS.map((c) => {
-              const meta = moodMeta(c.mood);
-              const active = postChip === c.label;
-              return (
-                <button
-                  key={c.label}
-                  type="button"
-                  onClick={() => setPostChip(active ? null : c.label)}
-                  aria-pressed={active}
-                  className={cn(
-                    'rounded-full border px-3 py-1 text-[13px] font-medium transition-all duration-200 ease-soft',
-                    active
-                      ? 'border-transparent'
-                      : 'border-haven-border bg-white text-haven-text-muted hover:bg-haven-canvas',
-                  )}
-                  style={active ? { backgroundColor: meta.chipBg, color: meta.chipText } : undefined}
-                >
-                  {c.label}
-                </button>
-              );
-            })}
-            <button
-              type="button"
-              onClick={() => postImageInputRef.current?.click()}
-              aria-label="Add a photo or GIF"
-              title="Add a photo or GIF"
-              className="flex items-center gap-1.5 rounded-full border border-haven-border bg-white px-3 py-1 text-[13px] font-medium text-haven-text-muted transition-all duration-200 ease-soft hover:border-haven-primary/40 hover:text-haven-primary"
-            >
-              <ImagePlus size={14} strokeWidth={1.75} />
-              Photo/GIF
-            </button>
-            <input
-              ref={postImageInputRef}
-              type="file"
-              accept="image/*,.gif"
-              className="hidden"
-              onChange={pickPostImage}
-            />
-            <button
-              type="button"
-              onClick={sharePost}
-              disabled={!postDraft.trim() && !postImage}
-              className="ml-auto rounded-full bg-haven-primary px-5 py-1.5 text-[13px] font-semibold text-white transition-all duration-200 ease-soft hover:bg-haven-primary-hover disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              Share
-            </button>
-          </div>
-          <AudiencePicker value={postAudience} onChange={setPostAudience} />
-          <AnimatePresence>
-            {postImage && (
-              <motion.div
-                initial={{ opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 6 }}
-                transition={{ duration: 0.25 }}
-                className="relative ml-[52px] mt-3 w-fit"
-              >
-                <img
-                  src={postImage}
-                  alt="Attached preview"
-                  className="max-h-40 rounded-xl border border-haven-border object-cover"
-                />
-                <button
-                  type="button"
-                  onClick={() => setPostImage(null)}
-                  aria-label="Remove attachment"
-                  className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-white text-haven-text shadow-card transition-colors hover:text-haven-danger"
-                >
-                  <X size={13} strokeWidth={2} />
-                </button>
-              </motion.div>
-            )}
-          </AnimatePresence>
-          <AnimatePresence>
-            {justShared && (
-              <motion.p
-                initial={{ opacity: 0, y: 4 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-                className="mt-2 flex items-center gap-1.5 pl-[52px] text-[13px] font-medium text-haven-primary"
-              >
-                <Check size={14} strokeWidth={2} /> Shared — find it in your Posts tab below.
-              </motion.p>
-            )}
-          </AnimatePresence>
-          <p className="mt-2 pl-[52px] text-[13px] text-haven-text-muted">
-            Posts are anonymous by default. Press Enter to share, Shift+Enter for a new line.
-          </p>
-        </motion.section>
+          <LetItOutComposer
+            {...(entries[toLocalDateKey(new Date())]?.mood
+              ? { todayMood: entries[toLocalDateKey(new Date())].mood }
+              : {})}
+            avatarInitial={initial}
+            avatarColor={avatarColor}
+            onSubmit={handleComposerSubmit}
+            submitting={shareMutation.isPending}
+          />
+        </motion.div>
       </section>
 
       {/* 5–6. Tabs: posts / saved / highlights */}
@@ -564,16 +508,32 @@ export default function Profile() {
 
         <div className="mt-5 space-y-4">
           {tab === 'posts' &&
-            userPosts.map((post, i) => (
-              <PostCard key={post.id} post={post} index={i} onUpdate={updatePost} />
+            (postsLoading ? (
+              <div className="animate-pulse rounded-xl border border-haven-border bg-white p-5 shadow-card">
+                <div className="h-3 w-1/2 rounded bg-haven-border/50" />
+                <div className="mt-3 h-3 w-full rounded bg-haven-border/40" />
+              </div>
+            ) : userPosts.length ? (
+              userPosts.map((post, i) => (
+                <PostCard key={post.id} post={post} index={i} onUpdate={updatePost} onDelete={deletePost} />
+              ))
+            ) : (
+              <div className="rounded-xl border border-haven-border bg-white p-8 text-center shadow-card">
+                <p className="text-xl font-medium text-haven-text">No posts yet.</p>
+                <p className="mt-1 text-sm text-haven-text-muted">
+                  {isAuthenticated
+                    ? 'What you share will live here — and follow you across devices.'
+                    : 'Sign in to start sharing.'}
+                </p>
+              </div>
             ))}
 
           {tab === 'saved' &&
             (savedPosts.length ? (
               savedPosts.map((post, i) => <PostCard key={post.id} post={post} index={i} />)
             ) : (
-              <div className="rounded-2xl border border-haven-border bg-white p-8 text-center shadow-card">
-                <p className="font-serif text-xl font-medium text-haven-text">Nothing saved yet.</p>
+              <div className="rounded-xl border border-haven-border bg-white p-8 text-center shadow-card">
+                <p className="text-xl font-medium text-haven-text">Nothing saved yet.</p>
                 <p className="mt-1 text-sm text-haven-text-muted">
                   Posts you bookmark will wait for you here.
                 </p>
@@ -593,7 +553,7 @@ export default function Profile() {
                     initial={{ opacity: 0, y: 16 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.35, delay: i * 0.06, ease: [0.22, 1, 0.36, 1] }}
-                    className="rounded-2xl border border-haven-border bg-white p-5 shadow-card"
+                    className="rounded-xl border border-haven-border bg-white p-5 shadow-card"
                   >
                     <div className="flex items-center justify-between gap-2">
                       <p className="text-xs font-medium text-haven-text-muted">
@@ -618,8 +578,8 @@ export default function Profile() {
                 ))}
               </>
             ) : (
-              <div className="rounded-2xl border border-haven-border bg-white p-8 text-center shadow-card">
-                <p className="font-serif text-xl font-medium text-haven-text">
+              <div className="rounded-xl border border-haven-border bg-white p-8 text-center shadow-card">
+                <p className="text-xl font-medium text-haven-text">
                   No highlights yet.
                 </p>
                 <p className="mt-1 text-sm text-haven-text-muted">
@@ -632,7 +592,7 @@ export default function Profile() {
 
       {/* Edit profile modal */}
       <AnimatePresence>
-        {editOpen && (
+        {editOpen && draft && (
           <motion.div
             className="fixed inset-0 z-[70] flex items-center justify-center p-4"
             initial={{ opacity: 0 }}
@@ -648,7 +608,7 @@ export default function Profile() {
               role="dialog"
               aria-modal="true"
               aria-label="Edit profile"
-              className="relative w-full max-w-md rounded-3xl bg-white p-6 shadow-card-hover"
+              className="relative max-h-[90vh] w-full max-w-md overflow-y-auto rounded-3xl bg-white p-6 shadow-card-hover"
               initial={{ opacity: 0, scale: 0.97, y: 12 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.98, y: 8 }}
@@ -662,25 +622,104 @@ export default function Profile() {
               >
                 <X size={18} strokeWidth={1.75} />
               </button>
-              <h2 className="font-serif text-2xl font-medium text-haven-text">Edit profile</h2>
+              <h2 className="text-2xl font-medium text-haven-text">Edit profile</h2>
 
-              <label className="mt-5 block">
+              {/* Cover image */}
+              <div className="mt-5">
+                <span className="text-xs font-medium uppercase tracking-[0.08em] text-haven-text-muted">
+                  Cover image
+                </span>
+                <button
+                  type="button"
+                  onClick={() => coverInputRef.current?.click()}
+                  className="mt-1.5 block h-24 w-full overflow-hidden rounded-xl border border-dashed border-haven-border bg-haven-canvas text-xs text-haven-text-muted transition-colors hover:border-haven-primary/40 hover:text-haven-primary"
+                >
+                  {draft.coverImage ? (
+                    <img src={draft.coverImage} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    'Add a cover image'
+                  )}
+                </button>
+                <input
+                  ref={coverInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={pickDraftImage((url) => setDraft({ ...draft, coverImage: url }))}
+                />
+                {draft.coverImage && (
+                  <button
+                    type="button"
+                    onClick={() => setDraft({ ...draft, coverImage: null })}
+                    className="mt-1 text-xs text-haven-text-muted hover:text-haven-danger"
+                  >
+                    Remove cover
+                  </button>
+                )}
+              </div>
+
+              {/* Avatar */}
+              <div className="mt-4 flex items-center gap-3">
+                {draft.avatarUrl ? (
+                  <img
+                    src={draft.avatarUrl}
+                    alt=""
+                    className="h-14 w-14 rounded-full object-cover"
+                  />
+                ) : (
+                  <span
+                    className="flex h-14 w-14 items-center justify-center rounded-full text-lg font-semibold text-white"
+                    style={{ backgroundColor: draft.avatarColor }}
+                  >
+                    {draft.displayName.charAt(0).toUpperCase() || '?'}
+                  </span>
+                )}
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => avatarInputRef.current?.click()}
+                    className="rounded-full border border-haven-border bg-white px-3 py-1.5 text-xs font-semibold text-haven-text hover:border-haven-primary/40 hover:text-haven-primary"
+                  >
+                    Upload photo
+                  </button>
+                  {draft.avatarUrl && (
+                    <button
+                      type="button"
+                      onClick={() => setDraft({ ...draft, avatarUrl: null })}
+                      className="ml-2 text-xs text-haven-text-muted hover:text-haven-danger"
+                    >
+                      Remove
+                    </button>
+                  )}
+                  <input
+                    ref={avatarInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={pickDraftImage((url) => setDraft({ ...draft, avatarUrl: url }))}
+                  />
+                </div>
+              </div>
+
+              <label className="mt-4 block">
                 <span className="text-xs font-medium uppercase tracking-[0.08em] text-haven-text-muted">
                   Display name
                 </span>
                 <input
-                  value={draft.name}
-                  onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+                  value={draft.displayName}
+                  onChange={(e) => setDraft({ ...draft, displayName: e.target.value })}
+                  maxLength={60}
                   className="mt-1.5 w-full rounded-xl border border-haven-border bg-haven-canvas px-3 py-2.5 text-sm text-haven-text focus:outline-none focus:ring-2 focus:ring-haven-primary/40"
                 />
               </label>
               <label className="mt-4 block">
                 <span className="text-xs font-medium uppercase tracking-[0.08em] text-haven-text-muted">
-                  Pseudonym
+                  Pseudonym (shown on your posts)
                 </span>
                 <input
                   value={draft.pseudonym}
                   onChange={(e) => setDraft({ ...draft, pseudonym: e.target.value })}
+                  maxLength={60}
                   className="mt-1.5 w-full rounded-xl border border-haven-border bg-haven-canvas px-3 py-2.5 text-sm text-haven-text focus:outline-none focus:ring-2 focus:ring-haven-primary/40"
                 />
               </label>
@@ -692,12 +731,13 @@ export default function Profile() {
                   value={draft.bio}
                   onChange={(e) => setDraft({ ...draft, bio: e.target.value })}
                   rows={3}
+                  maxLength={280}
                   className="mt-1.5 w-full resize-none rounded-xl border border-haven-border bg-haven-canvas px-3 py-2.5 text-sm leading-relaxed text-haven-text focus:outline-none focus:ring-2 focus:ring-haven-primary/40"
                 />
               </label>
               <div className="mt-4">
                 <span className="text-xs font-medium uppercase tracking-[0.08em] text-haven-text-muted">
-                  Avatar color
+                  Avatar color (used when no photo is set)
                 </span>
                 <div className="mt-2 flex gap-2">
                   {AVATAR_COLORS.map((color) => (
@@ -713,7 +753,9 @@ export default function Profile() {
                       )}
                       style={{ backgroundColor: color }}
                     >
-                      {draft.avatarColor === color ? draft.name.charAt(0).toUpperCase() : ''}
+                      {draft.avatarColor === color
+                        ? draft.displayName.charAt(0).toUpperCase()
+                        : ''}
                     </button>
                   ))}
                 </div>
@@ -721,15 +763,16 @@ export default function Profile() {
 
               <p className="mt-4 flex items-center gap-1.5 text-xs text-haven-text-muted">
                 <Lock size={13} strokeWidth={1.75} />
-                Only you can see this.
+                Saved to your account — visible wherever you sign in.
               </p>
               <button
                 type="button"
                 onClick={saveProfile}
-                className="mt-4 w-full rounded-full bg-haven-primary py-3 text-sm font-semibold text-white transition-all duration-200 ease-soft hover:bg-haven-primary-hover"
+                disabled={updateProfileMutation.isPending}
+                className="mt-4 w-full rounded-full bg-haven-primary py-3 text-sm font-semibold text-white transition-all duration-200 ease-soft hover:bg-haven-primary-hover disabled:opacity-50"
               >
-                Save changes
-                   </button>
+                {updateProfileMutation.isPending ? 'Saving…' : 'Save changes'}
+              </button>
             </motion.div>
           </motion.div>
         )}

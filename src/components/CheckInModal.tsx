@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Lock, X } from 'lucide-react';
 import { MOODS, saveCheckIn, todayKey, useMoodEntries, type MoodValue } from '@/lib/moodStore';
+import { MoodFace, moodKeyFor } from '@/components/DailyCheckInCard';
 import { cn } from '@/lib/utils';
 
 interface CheckInModalProps {
@@ -72,7 +73,7 @@ export default function CheckInModal({ open, onOpenChange, initialMood, date, in
               <X size={18} strokeWidth={1.75} />
             </button>
 
-            <h2 className="font-serif text-2xl font-medium tracking-[-0.01em] text-haven-text">
+            <h2 className="text-2xl font-medium tracking-[-0.01em] text-haven-text">
               How are you feeling{dateKey === todayKey() ? ' today' : ''}?
             </h2>
             <p className="mt-1 text-sm text-haven-text-muted">
@@ -90,12 +91,16 @@ export default function CheckInModal({ open, onOpenChange, initialMood, date, in
                     animate={{ opacity: 1, scale: active ? 1.12 : 1 }}
                     transition={{ delay: i * 0.05, type: 'spring', stiffness: 300, damping: 18 }}
                     onClick={() => setSelected(m.value)}
-                    className="flex flex-1 flex-col items-center gap-1.5 rounded-2xl px-1 py-3 transition-colors"
+                    className="flex flex-1 flex-col items-center gap-1.5 rounded-xl px-1 py-3 transition-colors"
                     style={{ backgroundColor: active ? m.chipBg : 'transparent' }}
                     aria-pressed={active}
                   >
-                    <span className="text-2xl" aria-hidden>
-                      {m.emoji}
+                    <span
+                      aria-hidden
+                      className={cn(active ? '' : 'text-haven-text-muted')}
+                      style={active ? { color: m.chipText } : undefined}
+                    >
+                      <MoodFace mood={moodKeyFor(m.value)} className="h-8 w-8" />
                     </span>
                     <span
                       className={cn('text-[11px] font-medium', active ? '' : 'text-haven-text-muted')}
@@ -118,7 +123,7 @@ export default function CheckInModal({ open, onOpenChange, initialMood, date, in
                 rows={3}
                 maxLength={280}
                 placeholder="What's on your mind? A sentence is plenty…"
-                className="mt-2 w-full resize-none rounded-xl border border-haven-border bg-haven-canvas p-3 text-sm leading-relaxed text-haven-text placeholder:text-haven-text-muted/70 focus:outline-none focus:ring-2 focus:ring-haven-primary/40"
+                className="mt-2 w-full resize-none rounded-xl border border-haven-border bg-white p-3 text-sm leading-relaxed text-haven-text placeholder:text-haven-text-muted/70 focus:outline-none focus:ring-2 focus:ring-haven-primary/40"
               />
             </label>
 

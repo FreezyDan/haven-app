@@ -61,7 +61,7 @@ export default function Layout() {
     };
   }, []);
 
-  const bgStyle: React.CSSProperties | undefined = bg
+  const bgStyle: React.CSSProperties = bg
     ? bg.type === 'color'
       ? { backgroundColor: bg.value }
       : {
@@ -70,16 +70,23 @@ export default function Layout() {
           backgroundPosition: 'center',
           backgroundAttachment: 'fixed',
         }
-    : undefined;
+    : {
+        // Default backdrop — the dreamy lavender night doodle pattern.
+        // A user's own background choice (Settings) always overrides this.
+        backgroundImage: "url('/bg-doodle-light.webp')",
+        backgroundRepeat: 'repeat',
+        backgroundSize: '1100px auto',
+        backgroundAttachment: 'fixed',
+      };
 
   return (
     <HavenUiContext.Provider value={ui}>
-      <div className="min-h-[100dvh] bg-haven-canvas" style={bgStyle}>
+      <div className="min-h-[100dvh]" style={bgStyle}>
         <Sidebar open={navOpen} onClose={() => setNavOpen(false)} />
         <div className="flex min-h-[100dvh] flex-col lg:ml-[248px]">
           <Topbar onMenuOpen={() => setNavOpen(true)} />
           <div className="flex flex-1 items-start">
-            <main className="flex-1 px-4 py-6 sm:px-8 sm:py-8">
+            <main className="flex-1 px-4 py-6 sm:py-8 sm:pl-8 sm:pr-4">
               <AnimatePresence mode="wait" initial={false}>
                 <motion.div
                   key={location.pathname}
@@ -92,9 +99,9 @@ export default function Layout() {
                 </motion.div>
               </AnimatePresence>
             </main>
-            <aside className="sticky top-[73px] hidden max-h-[calc(100dvh-73px)] w-80 shrink-0 self-start overflow-hidden px-6 py-8 xl:block">
-              <h2 className="mb-4 font-serif text-lg font-semibold text-haven-text">
-                Something good for you…
+            <aside className="sticky top-[73px] hidden max-h-[calc(100dvh-73px)] w-80 shrink-0 self-start overflow-hidden pb-8 pl-2 pr-6 pt-4 xl:block">
+              <h2 className="mb-4 font-serif text-[22px] font-medium text-haven-text">
+                This might help
               </h2>
               <div className="scrollbar-calm max-h-[calc(100dvh-73px-7rem)] space-y-4 overflow-y-auto pb-2 pr-2">
                 {ARTICLES.map((a, i) => (
@@ -106,7 +113,7 @@ export default function Layout() {
                   >
                     <Link
                       to={`/blogs/${a.slug}`}
-                      className="block overflow-hidden rounded-2xl border border-haven-border bg-white shadow-card transition-all duration-200 ease-soft hover:-translate-y-0.5 hover:shadow-card-hover"
+                      className="block overflow-hidden rounded-xl border border-haven-border bg-white shadow-card transition-all duration-200 ease-soft hover:-translate-y-0.5 hover:shadow-card-hover"
                     >
                       <img
                         src={a.cover}

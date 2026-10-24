@@ -4,7 +4,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import {
   AlertTriangle,
   Bell,
-  BookOpen,
+  BookOpen, BookHeart,
   CalendarHeart,
   Check,
   ChevronDown,
@@ -13,32 +13,39 @@ import {
   MessageCircle,
   NotebookPen,
   Settings,
+  ShieldCheck,
   User,
 } from 'lucide-react';
-import { moodMeta, useMoodToday } from '@/lib/moodStore';
 import { BG_PRESETS, loadBg, saveBg, type BgChoice } from '@/lib/bgStore';
 import { readImageFile } from '@/components/PostCard';
+import { trpc } from '@/providers/trpc';
 import { cn } from '@/lib/utils';
 import { useHavenUi } from '@/components/Layout';
 
 const NAV_ITEMS = [
   { to: '/', label: 'Home', icon: Home, end: true },
-  { to: '/notifications', label: 'Notifications', icon: Bell, badge: 3 },
+  { to: '/notifications', label: 'Notifications', icon: Bell, notifBadge: true },
   { to: '/chats', label: 'Chats', icon: MessageCircle },
   { to: '/journal', label: 'My Journal', icon: NotebookPen },
   { to: '/mood', label: 'Mood Tracker', icon: CalendarHeart },
   { to: '/blogs', label: 'Blogs', icon: BookOpen },
+  { to: '/stories', label: 'Stories', icon: BookHeart },
   { to: '/profile', label: 'Profile', icon: User },
   { to: '/settings', label: 'Settings', icon: Settings },
+  { to: '/moderation', label: 'Moderation', icon: ShieldCheck },
 ];
 
 export default function Sidebar({ open = false, onClose }: { open?: boolean; onClose?: () => void }) {
   const { openCrisis, openCheckIn } = useHavenUi();
-  const todayEntry = useMoodToday();
-  const todayMeta = todayEntry ? moodMeta(todayEntry.mood) : null;
   const [bg, setBg] = useState<BgChoice | null>(loadBg);
   const [bgOpen, setBgOpen] = useState(false);
   const bgInputRef = useRef<HTMLInputElement>(null);
+  // Live unread count for the Notifications badge — same source as the bell.
+  const unreadQ = trpc.notifications.unreadCount.useQuery(undefined, {
+    retry: 1,
+    refetchInterval: 15_000,
+  });
+  const unread = unreadQ.data ?? 0;
 
   const chooseBg = (choice: BgChoice | null) => {
     setBg(choice);
@@ -105,16 +112,9 @@ export default function Sidebar({ open = false, onClose }: { open?: boolean; onC
                 )}
                 <item.icon size={18} strokeWidth={1.75} className="relative shrink-0" />
                 <span className="relative flex-1">{item.label}</span>
-                {item.label === 'Mood Tracker' && todayMeta && (
-                  <span
-                    className="relative h-2.5 w-2.5 rounded-full"
-                    style={{ backgroundColor: todayMeta.dot }}
-                    title={`Today: ${todayMeta.label}`}
-                  />
-                )}
-                {item.badge ? (
+                {'notifBadge' in item && item.notifBadge && unread > 0 ? (
                   <span className="relative flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-[#C0453B] px-1 text-[11px] font-medium text-white">
-                    {item.badge}
+                    {unread > 99 ? '99+' : unread}
                   </span>
                 ) : null}
               </span>
@@ -129,26 +129,12 @@ export default function Sidebar({ open = false, onClose }: { open?: boolean; onC
         onClick={() => openCheckIn()}
         className="mt-4 rounded-xl bg-white/5 p-3 text-left transition-colors duration-200 hover:bg-white/10"
       >
-        {todayMeta ? (
-          <>
-            <span className="block text-[11px] font-medium uppercase tracking-[0.08em] text-[#A5A4DC]">
-              Today
-            </span>
-            <span className="mt-1 flex items-center gap-2 text-sm font-medium text-white">
-              <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: todayMeta.dot }} />
-              {todayMeta.emoji} {todayMeta.shortLabel}
-            </span>
-          </>
-        ) : (
-          <>
-            <span className="block text-[11px] font-medium uppercase tracking-[0.08em] text-[#A5A4DC]">
-              Daily check-in
-            </span>
-            <span className="mt-1 block font-serif text-[15px] text-white">
-              How are you today?
-            </span>
-          </>
-        )}
+        <span className="block text-[11px] font-medium uppercase tracking-[0.08em] text-[#A5A4DC]">
+          Daily check-in
+        </span>
+        <span className="mt-1 block font-serif text-[15px] text-white">
+          How are you today?
+        </span>
       </button>
 
       {/* Background picker dropdown — changes only the page backdrop */}

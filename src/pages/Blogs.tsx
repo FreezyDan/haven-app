@@ -143,7 +143,7 @@ export default function Blogs() {
         <Link
           to={`/blogs/${featured.slug}`}
           className={cn(
-            'group mb-8 block overflow-hidden rounded-2xl border border-[#E7E7F0] bg-white shadow-[0_1px_3px_rgba(36,35,90,0.06)] transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_8px_24px_rgba(36,35,90,0.12)]',
+            'group mb-8 block overflow-hidden rounded-xl border border-[#E7E7F0] bg-white shadow-[0_1px_3px_rgba(36,35,90,0.06)] transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_8px_24px_rgba(36,35,90,0.12)]',
             mounted ? 'translate-y-0 opacity-100' : 'translate-y-4 opacity-0',
           )}
           style={{ transitionDuration: '600ms' }}
@@ -177,7 +177,7 @@ export default function Blogs() {
 
       {/* Article grid */}
       {gridArticles.length === 0 ? (
-        <div className="rounded-2xl border border-[#E7E7F0] bg-white p-8 text-center">
+        <div className="rounded-xl border border-[#E7E7F0] bg-white p-8 text-center">
           <p className="font-[Fraunces,serif] text-lg text-[#23223A]">Nothing here just yet.</p>
           <p className="mt-1 text-sm text-[#6E6E88]">Try a different topic or a gentler search — the right words are nearby.</p>
         </div>
@@ -187,7 +187,7 @@ export default function Blogs() {
             <Link
               key={a.slug}
               to={`/blogs/${a.slug}`}
-              className="group flex flex-col overflow-hidden rounded-2xl border border-[#E7E7F0] bg-white shadow-[0_1px_3px_rgba(36,35,90,0.06)] transition-all duration-300 hover:-translate-y-[3px] hover:shadow-[0_10px_24px_rgba(36,35,90,0.12)]"
+              className="group flex flex-col overflow-hidden rounded-xl border border-[#E7E7F0] bg-white shadow-[0_1px_3px_rgba(36,35,90,0.06)] transition-all duration-300 hover:-translate-y-[3px] hover:shadow-[0_10px_24px_rgba(36,35,90,0.12)]"
               style={{
                 animation: `havenRise 350ms cubic-bezier(0.22,1,0.36,1) both`,
                 animationDelay: `${i * 60}ms`,

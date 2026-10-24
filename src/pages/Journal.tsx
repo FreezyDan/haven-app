@@ -9,7 +9,7 @@ import ExtraCareCard, { isCareCardDismissedToday } from '@/components/ExtraCareC
 import { useHavenUi } from '@/components/Layout';
 import {
   MOODS,
-  getMoodStats,
+  moodStatsFrom,
   moodMeta,
   useMoodEntries,
   useMoodStreak,
@@ -19,14 +19,14 @@ import {
 import {
   deriveTitle,
   formatEntryDate,
-  loadJournalEntries,
-  saveJournalEntries,
+  toUiJournalEntry,
   type JournalEntry,
 } from '@/components/wellness/journalStore';
+import { trpc } from '@/providers/trpc';
 import { cn } from '@/lib/utils';
 
-function trendLine(): string {
-  const stats = getMoodStats(30);
+function trendLine(entries: ReturnType<typeof useMoodEntries>): string {
+  const stats = moodStatsFrom(entries, 30);
   if (stats.total === 0) return 'Check in a few times and gentle patterns will appear here.';
   const sorted = (Object.entries(stats.distribution) as [MoodValue, number][]).sort(
     (a, b) => b[1] - a[1],
@@ -46,7 +46,21 @@ export default function Journal() {
   const extraCare = useNeedsExtraCare();
   const [careDismissed, setCareDismissed] = useState(isCareCardDismissedToday);
 
-  const [journalEntries, setJournalEntries] = useState<JournalEntry[]>(loadJournalEntries);
+  const utils = trpc.useUtils();
+  const journalQ = trpc.journal.list.useQuery(undefined, { retry: false });
+  const journalEntries = useMemo(
+    () => (journalQ.data ?? []).map(toUiJournalEntry),
+    [journalQ.data],
+  );
+  const createMut = trpc.journal.create.useMutation({
+    onSuccess: () => utils.journal.list.invalidate(),
+  });
+  const updateMut = trpc.journal.update.useMutation({
+    onSuccess: () => utils.journal.list.invalidate(),
+  });
+  const deleteMut = trpc.journal.delete.useMutation({
+    onSuccess: () => utils.journal.list.invalidate(),
+  });
   const [draft, setDraft] = useState('');
   const [draftMood, setDraftMood] = useState<MoodValue | null>(null);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
@@ -58,29 +72,25 @@ export default function Journal() {
   const hasMoodData = useMemo(() => Object.keys(entries).length > 0, [entries]);
   const selectedEntry = selectedDay ? entries[selectedDay] : undefined;
 
-  const persist = (next: JournalEntry[]) => {
-    setJournalEntries(next);
-    saveJournalEntries(next);
-  };
-
   const saveEntry = () => {
     const body = draft.trim();
-    if (!body) return;
+    if (!body || createMut.isPending) return;
     const mood = draftMood;
-    const entry: JournalEntry = {
-      id: `j-${Date.now()}`,
-      date: new Date().toLocaleDateString('en-CA'),
-      title: deriveTitle(body),
-      body,
-      ...(mood
-        ? { moodChip: mood, moodLabel: moodMeta(mood).shortLabel }
-        : {}),
-    };
-    persist([entry, ...journalEntries]);
-    setDraft('');
-    setDraftMood(null);
-    setJustSaved(true);
-    window.setTimeout(() => setJustSaved(false), 2000);
+    createMut.mutate(
+      {
+        title: deriveTitle(body),
+        body,
+        ...(mood ? { moodChip: mood, moodLabel: moodMeta(mood).shortLabel } : {}),
+      },
+      {
+        onSuccess: () => {
+          setDraft('');
+          setDraftMood(null);
+          setJustSaved(true);
+          window.setTimeout(() => setJustSaved(false), 2000);
+        },
+      },
+    );
   };
 
   const openEntryModal = (entry: JournalEntry) => {
@@ -90,12 +100,21 @@ export default function Journal() {
   };
 
   const updateEntry = (id: string, patch: Partial<JournalEntry>) => {
-    persist(journalEntries.map((e) => (e.id === id ? { ...e, ...patch } : e)));
+    const entry = journalEntries.find((e) => e.id === id);
+    if (!entry) return;
     setOpenEntry((cur) => (cur && cur.id === id ? { ...cur, ...patch } : cur));
+    updateMut.mutate({
+      id: entry.dbId,
+      ...(patch.title !== undefined ? { title: patch.title } : {}),
+      ...(patch.body !== undefined ? { body: patch.body } : {}),
+      ...(patch.starred !== undefined ? { starred: patch.starred } : {}),
+    });
   };
 
   const deleteEntry = (id: string) => {
-    persist(journalEntries.filter((e) => e.id !== id));
+    const entry = journalEntries.find((e) => e.id === id);
+    if (!entry) return;
+    deleteMut.mutate({ id: entry.dbId });
     setOpenEntry(null);
   };
 
@@ -112,7 +131,7 @@ export default function Journal() {
         initial={{ opacity: 0, y: -12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
-        className="flex items-start gap-3 rounded-2xl bg-haven-primary-soft p-5"
+        className="flex items-start gap-3 rounded-xl bg-haven-primary-soft p-5"
       >
         <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/70 text-haven-primary">
           <Lock size={18} strokeWidth={1.75} />
@@ -135,7 +154,7 @@ export default function Journal() {
         initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.35, delay: 0.05, ease: [0.22, 1, 0.36, 1] }}
-        className="rounded-2xl border border-haven-border bg-white p-5 shadow-card transition-shadow duration-200 focus-within:shadow-card-hover"
+        className="rounded-xl border border-haven-border bg-white p-5 shadow-card transition-shadow duration-200 focus-within:shadow-card-hover"
       >
         <textarea
           id="journal-composer"
@@ -143,7 +162,7 @@ export default function Journal() {
           onChange={(e) => setDraft(e.target.value)}
           rows={10}
           placeholder="Write freely in your journal… there's no wrong way to feel."
-          className="min-h-[240px] w-full resize-y rounded-xl border border-haven-border bg-haven-canvas p-4 text-[15px] leading-relaxed text-haven-text placeholder:text-haven-text-muted/70 focus:outline-none focus:ring-2 focus:ring-haven-primary/40"
+          className="min-h-[240px] w-full resize-y rounded-xl border border-haven-border bg-white p-4 text-[15px] leading-relaxed text-haven-text placeholder:text-haven-text-muted/70 focus:outline-none focus:ring-2 focus:ring-haven-primary/40"
         />
 
         <AudioJournal />
@@ -166,7 +185,7 @@ export default function Journal() {
               )}
               style={{ backgroundColor: m.chipBg, color: m.chipText }}
             >
-              {m.emoji} {m.shortLabel}
+              {m.shortLabel}
             </button>
           ))}
           <button
@@ -190,7 +209,7 @@ export default function Journal() {
         initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.35, delay: 0.1, ease: [0.22, 1, 0.36, 1] }}
-        className="rounded-2xl border border-haven-border bg-white p-5 shadow-card"
+        className="rounded-xl border border-haven-border bg-white p-5 shadow-card"
       >
         <div className="mb-4 flex items-baseline justify-between gap-3">
           <h2 className="text-lg font-semibold text-haven-text">Your mood at a glance</h2>
@@ -218,7 +237,7 @@ export default function Journal() {
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: 8 }}
                   transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
-                  className="mt-4 rounded-xl border border-haven-border bg-haven-canvas p-4"
+                  className="mt-4 rounded-xl border border-haven-border bg-white p-4"
                 >
                   <div className="flex items-center justify-between gap-3">
                     <p className="text-sm font-semibold text-haven-text">
@@ -227,7 +246,7 @@ export default function Journal() {
                     {selectedEntry && <MoodChip mood={selectedEntry.mood} />}
                   </div>
                   {selectedEntry?.note ? (
-                    <p className="mt-2 font-serif text-[15px] italic leading-relaxed text-haven-text/90">
+                    <p className="mt-2 text-[15px] italic leading-relaxed text-haven-text/90">
                       “{selectedEntry.note}”
                     </p>
                   ) : (
@@ -263,7 +282,7 @@ export default function Journal() {
                 <Sprout size={13} strokeWidth={1.75} />
                 {streak} {streak === 1 ? 'day' : 'days'} showing up for yourself
               </span>
-              <p className="text-[13px] text-haven-text-muted">{trendLine()}</p>
+              <p className="text-[13px] text-haven-text-muted">{trendLine(entries)}</p>
             </div>
           </>
         ) : (
@@ -282,9 +301,9 @@ export default function Journal() {
           Recent entries
         </p>
         {journalEntries.length === 0 ? (
-          <div className="rounded-2xl border border-haven-border bg-white p-8 text-center shadow-card">
+          <div className="rounded-xl border border-haven-border bg-white p-8 text-center shadow-card">
             <img src="/empty-feed.svg" alt="" className="mx-auto w-56" />
-            <h3 className="mt-4 font-serif text-2xl font-medium text-haven-text">
+            <h3 className="mt-4 text-2xl font-medium text-haven-text">
               Your journal is waiting.
             </h3>
             <p className="mt-1 text-sm text-haven-text-muted">
@@ -302,7 +321,7 @@ export default function Journal() {
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 transition={{ duration: 0.35, delay: i * 0.06, ease: [0.22, 1, 0.36, 1] }}
                 whileHover={{ y: -2 }}
-                className="rounded-2xl border border-haven-border bg-white p-5 text-left shadow-card transition-shadow duration-200 hover:shadow-card-hover"
+                className="rounded-xl border border-haven-border bg-white p-5 text-left shadow-card transition-shadow duration-200 hover:shadow-card-hover"
               >
                 <div className="flex items-center justify-between gap-2">
                   <p className="text-xs font-medium text-haven-text-muted">
@@ -376,7 +395,7 @@ export default function Journal() {
                 onChange={(e) => setEditBody(e.target.value)}
                 onBlur={() => updateEntry(openEntry.id, { body: editBody })}
                 rows={7}
-                className="mt-3 w-full resize-none rounded-xl border border-haven-border bg-haven-canvas p-3 text-sm leading-relaxed text-haven-text focus:outline-none focus:ring-2 focus:ring-haven-primary/40"
+                className="mt-3 w-full resize-none rounded-xl border border-haven-border bg-white p-3 text-sm leading-relaxed text-haven-text focus:outline-none focus:ring-2 focus:ring-haven-primary/40"
               />
 
               <div className="mt-3 flex items-center gap-1.5 text-xs text-haven-text-muted">

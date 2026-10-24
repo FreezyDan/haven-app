@@ -3,12 +3,13 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { Link } from 'react-router';
 import { CalendarCheck, PenLine, Sprout } from 'lucide-react';
 import MoodCalendar from '@/components/MoodCalendar';
+import { MoodFace, moodKeyFor } from '@/components/DailyCheckInCard';
 import MoodChip from '@/components/MoodChip';
 import ExtraCareCard, { isCareCardDismissedToday } from '@/components/ExtraCareCard';
 import { useHavenUi } from '@/components/Layout';
 import {
   MOODS,
-  getMoodStats,
+  moodStatsFrom,
   moodMeta,
   toLocalDateKey,
   todayKey,
@@ -63,7 +64,7 @@ export default function Mood() {
   const today = todayKey();
   const hasData = Object.keys(entries).length > 0;
   const selectedEntry = selectedDay ? entries[selectedDay] : undefined;
-  const stats30 = useMemo(() => getMoodStats(30), [entries]);
+  const stats30 = useMemo(() => moodStatsFrom(entries, 30), [entries]);
   const week = useMemo(weekCells, []);
   const weekEntries = week.map((c) => entries[c.key]);
 
@@ -105,8 +106,8 @@ export default function Mood() {
             <p className="text-xs font-medium uppercase tracking-[0.08em] text-haven-text-muted">
               Today's check-in
             </p>
-            <p className="font-serif text-2xl font-medium text-haven-text">
-              Today: {moodMeta(todayEntry.mood).emoji} {moodMeta(todayEntry.mood).shortLabel}
+            <p className="text-2xl font-medium text-haven-text">
+              Today: {moodMeta(todayEntry.mood).shortLabel}
               {todayEntry.note ? (
                 <span className="text-haven-text-muted"> — “{todayEntry.note}”</span>
               ) : null}
@@ -124,7 +125,7 @@ export default function Mood() {
           </div>
         ) : (
           <div className="flex flex-col items-center">
-            <h1 className="font-serif text-[32px] font-medium tracking-[-0.01em] text-haven-text">
+            <h1 className="text-[32px] font-medium tracking-[-0.01em] text-haven-text">
               How are you feeling today?
             </h1>
             <p className="mt-2 text-sm text-haven-text-muted">
@@ -139,11 +140,11 @@ export default function Mood() {
                   animate={{ opacity: 1, scale: 1 }}
                   transition={{ delay: i * 0.06, type: 'spring', stiffness: 300, damping: 18 }}
                   onClick={() => openCheckIn({ initialMood: m.value })}
-                  className="flex w-20 flex-col items-center gap-1.5 rounded-2xl px-2 py-3 transition-all duration-200 ease-soft hover:scale-105"
+                  className="flex w-20 flex-col items-center gap-1.5 rounded-xl px-2 py-3 transition-all duration-200 ease-soft hover:scale-105"
                   style={{ backgroundColor: m.chipBg }}
                 >
-                  <span className="flex h-14 w-14 items-center justify-center rounded-full bg-white/70 text-3xl">
-                    {m.emoji}
+                  <span className="flex h-14 w-14 items-center justify-center rounded-full bg-white/70" style={{ color: m.chipText }}>
+                    <MoodFace mood={moodKeyFor(m.value)} className="h-8 w-8" />
                   </span>
                   <span className="text-xs font-semibold" style={{ color: m.chipText }}>
                     {m.shortLabel}
@@ -175,7 +176,7 @@ export default function Mood() {
             transition={{ duration: 0.35, delay: 0.05, ease: [0.22, 1, 0.36, 1] }}
             className="grid gap-6 lg:grid-cols-[1fr_320px]"
           >
-            <div className="rounded-2xl border border-haven-border bg-white p-6 shadow-card">
+            <div className="rounded-xl border border-haven-border bg-white p-6 shadow-card">
               <div className="mb-4 flex items-baseline justify-between">
                 <h2 className="text-lg font-semibold text-haven-text">Your calendar</h2>
                 <button
@@ -200,7 +201,7 @@ export default function Mood() {
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0, x: 16 }}
                   transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-                  className="h-fit rounded-2xl border border-haven-border bg-white p-6 shadow-card"
+                  className="h-fit rounded-xl border border-haven-border bg-white p-6 shadow-card"
                 >
                   <p className="text-xs font-medium uppercase tracking-[0.08em] text-haven-text-muted">
                     Day detail
@@ -212,12 +213,12 @@ export default function Mood() {
                     <>
                       <div className="mt-3 flex items-center gap-2">
                         <span className="text-2xl" aria-hidden>
-                          {moodMeta(selectedEntry.mood).emoji}
+                          {moodMeta(selectedEntry.mood).shortLabel}
                         </span>
                         <MoodChip mood={selectedEntry.mood} />
                       </div>
                       {selectedEntry.note && (
-                        <p className="mt-3 font-serif text-lg italic leading-relaxed text-haven-text/90">
+                        <p className="mt-3 text-lg italic leading-relaxed text-haven-text/90">
                           “{selectedEntry.note}”
                         </p>
                       )}
@@ -250,7 +251,7 @@ export default function Mood() {
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
-                  className="hidden h-fit rounded-2xl border border-dashed border-haven-border bg-white/60 p-6 text-center lg:block"
+                  className="hidden h-fit rounded-xl border border-dashed border-haven-border bg-white/60 p-6 text-center lg:block"
                 >
                   <CalendarCheck size={22} strokeWidth={1.75} className="mx-auto text-haven-text-muted" />
                   <p className="mt-2 text-sm text-haven-text-muted">
@@ -268,7 +269,7 @@ export default function Mood() {
               initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.35, delay: 0.08, ease: [0.22, 1, 0.36, 1] }}
-              className="rounded-2xl border border-haven-border bg-white p-6 shadow-card"
+              className="rounded-xl border border-haven-border bg-white p-6 shadow-card"
             >
               <div className="flex items-center gap-2 text-haven-primary">
                 <Sprout size={20} strokeWidth={1.75} />
@@ -287,7 +288,7 @@ export default function Mood() {
               initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.35, delay: 0.16, ease: [0.22, 1, 0.36, 1] }}
-              className="rounded-2xl border border-haven-border bg-white p-6 shadow-card"
+              className="rounded-xl border border-haven-border bg-white p-6 shadow-card"
             >
               <p className="text-xs font-medium uppercase tracking-[0.08em] text-haven-text-muted">
                 This week
@@ -329,7 +330,7 @@ export default function Mood() {
               initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.35, delay: 0.24, ease: [0.22, 1, 0.36, 1] }}
-              className="rounded-2xl border border-haven-border bg-white p-6 shadow-card"
+              className="rounded-xl border border-haven-border bg-white p-6 shadow-card"
             >
               <p className="text-xs font-medium uppercase tracking-[0.08em] text-haven-text-muted">
                 30-day balance
@@ -380,9 +381,9 @@ export default function Mood() {
             initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.35, delay: 0.3, ease: [0.22, 1, 0.36, 1] }}
-            className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-haven-border bg-white p-5 shadow-card"
+            className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-haven-border bg-white p-5 shadow-card"
           >
-            <p className="font-serif text-lg italic text-haven-text">“{quote}”</p>
+            <p className="text-lg italic text-haven-text">“{quote}”</p>
             <Link
               to="/journal"
               className="text-sm font-semibold text-haven-primary hover:text-haven-primary-hover"
@@ -396,10 +397,10 @@ export default function Mood() {
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.35, delay: 0.1 }}
-          className="rounded-2xl border border-haven-border bg-white p-10 text-center shadow-card"
+          className="rounded-xl border border-haven-border bg-white p-10 text-center shadow-card"
         >
           <img src="/empty-moods.svg" alt="" className="mx-auto w-64" />
-          <h2 className="mt-4 font-serif text-2xl font-medium text-haven-text">
+          <h2 className="mt-4 text-2xl font-medium text-haven-text">
             Your calendar is a blank page.
           </h2>
           <p className="mx-auto mt-2 max-w-md text-sm text-haven-text-muted">
@@ -411,7 +412,7 @@ export default function Mood() {
             className="mt-5 rounded-full bg-haven-primary px-6 py-3 text-sm font-semibold text-white transition-all duration-200 ease-soft hover:scale-[1.02] hover:bg-haven-primary-hover"
           >
             Check in now
-          </button>
+            </button>
         </motion.section>
       )}
     </div>

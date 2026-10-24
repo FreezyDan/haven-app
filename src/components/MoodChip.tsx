@@ -17,7 +17,7 @@ export default function MoodChip({ mood, label, className }: MoodChipProps) {
       )}
       style={{ backgroundColor: meta.chipBg, color: meta.chipText }}
     >
-      <span aria-hidden>{meta.emoji}</span>
+      <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: meta.dot }} />
       {label ?? meta.shortLabel}
     </span>
   );

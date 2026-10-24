@@ -1,208 +1,227 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useLocation } from 'react-router';
+import { useLocation, useNavigate } from 'react-router';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Check, ImagePlus, Leaf, X } from 'lucide-react';
-import PostCard, { readImageFile, type Post } from '@/components/PostCard';
-import AudiencePicker, {
-  DEFAULT_AUDIENCE,
-  audienceLabels,
-  type AudienceSelection,
-} from '@/components/AudiencePicker';
+import { Leaf, X } from 'lucide-react';
+import { toast } from 'sonner';
+import PostCard, { type Post } from '@/components/PostCard';
+import LetItOutComposer, { type LetItOutSubmit } from '@/components/LetItOutComposer';
+import { audienceLabels } from '@/components/AudiencePicker';
 import ExtraCareCard, { isCareCardDismissedToday } from '@/components/ExtraCareCard';
 import InspireSection from '@/components/inspire/InspireSection';
+import CommunityCarousel, { type CommunityQuote } from '@/components/CommunityCarousel';
+import { HIGHLIGHTS } from '@/lib/inspireData';
 import { useHavenUi } from '@/components/Layout';
-import { MOODS, moodMeta, needsExtraCare, useMoodEntries, useMoodToday, type MoodValue } from '@/lib/moodStore';
-import { cn } from '@/lib/utils';
+import {
+  moodMeta,
+  saveCheckIn,
+  todayKey,
+  useMoodEntries,
+  useMoodStreak,
+  useMoodToday,
+  useNeedsExtraCare,
+  type MoodValue,
+} from '@/lib/moodStore';
+import DailyCheckInCard from '@/components/DailyCheckInCard';
+import { toUiPost, usePosts, type ApiPost } from '@/lib/havenData';
+import { trpc } from '@/providers/trpc';
+import { useAuth } from '@/hooks/useAuth';
 
-const BANNER_KEY = 'haven.homeBannerDismissedSession';
-const USER_POSTS_KEY = 'haven.userPosts';
-
-const SEED_POSTS: Post[] = [
-  {
-    id: 'seed-1',
-    author: 'Anonymous otter',
-    avatarColor: '#5BA88A',
-    time: '2h',
-    moodChip: { label: 'Feeling heavy', bg: '#F7DDDA', text: '#A33B32' },
-    title: 'Some days are just heavy.',
-    body: "Woke up and everything felt like wading through mud. Didn't do much today and trying to be okay with that.",
-    hugs: 12,
-    replies: 5,
-  },
-  {
-    id: 'seed-2',
-    author: 'Quiet fox',
-    avatarColor: '#8B7BC7',
-    time: '5h',
-    moodChip: { label: 'Hopeful', bg: '#E4F2EA', text: '#2E7D5B' },
-    title: 'Small win today',
-    body: 'I made it outside for a ten-minute walk. First time this week. It rained a little and honestly it felt nice.',
-    hugs: 34,
-    replies: 11,
-  },
-  {
-    id: 'seed-3',
-    author: 'Gentle bear',
-    avatarColor: '#E0A983',
-    time: '8h',
-    moodChip: { label: 'Anxious', bg: '#FBEEC9', text: '#8A6B1F' },
-    title: 'Big meeting tomorrow',
-    body: 'My chest is already tight thinking about it. Anyone have grounding tricks that work in the moment?',
-    hugs: 19,
-    replies: 14,
-  },
-  {
-    id: 'seed-4',
-    author: 'Soft wren',
-    avatarColor: '#C98BA0',
-    time: '12h',
-    moodChip: { label: 'Calm', bg: '#E1EEF7', text: '#2F6C9C' },
-    title: 'Evening tea ritual',
-    body: 'Chamomile, low lights, no phone for 30 minutes. Sharing in case someone needs a small idea tonight.',
-    hugs: 27,
-    replies: 6,
-  },
-];
-
-const COMPOSER_MOODS: { label: string; mood: MoodValue }[] = [
-  { label: 'Feeling heavy', mood: 'struggling' },
-  { label: 'Anxious', mood: 'low' },
-  { label: 'Hopeful', mood: 'good' },
-  { label: 'Calm', mood: 'okay' },
-];
-
-function loadUserPosts(): Post[] {
-  try {
-    return JSON.parse(localStorage.getItem(USER_POSTS_KEY) ?? '[]') as Post[];
-  } catch {
-    return [];
-  }
-}
 
 export default function Home() {
-  const { openCheckIn, openCrisis } = useHavenUi();
+  const { openCrisis } = useHavenUi();
   const location = useLocation();
   const focusPost = (location.state as { focusPost?: string } | null)?.focusPost ?? null;
+  const focusReply =
+    (location.state as { focusReply?: number } | null)?.focusReply ?? undefined;
 
-  useEffect(() => {
-    if (!focusPost) return;
-    const t = window.setTimeout(() => {
-      document
-        .getElementById(`post-${focusPost}`)
-        ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }, 250);
-    return () => window.clearTimeout(t);
-  }, [focusPost]);
+  // focusPost scroll lives further down — it needs the feed's loading state,
+  // which isn't available yet at this point in the component.
   useMoodEntries();
   const todayEntry = useMoodToday();
   const todayMeta = todayEntry ? moodMeta(todayEntry.mood) : null;
-  const showCareCard = needsExtraCare() && !isCareCardDismissedToday();
+  const streak = useMoodStreak();
+  const showCareCard = useNeedsExtraCare() && !isCareCardDismissedToday();
 
-  const [bannerVisible, setBannerVisible] = useState(
-    () => sessionStorage.getItem(BANNER_KEY) !== '1',
-  );
-  const [text, setText] = useState('');
-  const [checkInNote, setCheckInNote] = useState('');
-  const [chip, setChip] = useState<string | null>(null);
-  const [justShared, setJustShared] = useState(false);
-  const [userPosts, setUserPosts] = useState<Post[]>(loadUserPosts);
+  // The safe-space banner shows on every fresh load/refresh; dismissing it
+  // only hides it until the next visit.
+  const [bannerVisible, setBannerVisible] = useState(true);
+  const navigate = useNavigate();
+  const { isAuthenticated } = useAuth();
+  const utils = trpc.useUtils();
+  const { posts: apiPosts, isLoading: feedLoading, hasMore, loadMore, loadingMore } = usePosts();
   const [hiddenPostIds, setHiddenPostIds] = useState<string[]>([]);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const [draftImage, setDraftImage] = useState<string | null>(null);
-  const imageInputRef = useRef<HTMLInputElement>(null);
-  const [audience, setAudience] = useState<AudienceSelection>(DEFAULT_AUDIENCE);
+  const profileQ = trpc.profile.get.useQuery(undefined, { retry: 1 });
+  const profile = profileQ.data ?? null;
 
-  const pickDraftImage = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file) return;
-    readImageFile(file, (dataUrl) => setDraftImage(dataUrl));
-  };
+  // Scroll to the post a notification pointed at — only once the feed has
+  // actually rendered it. If it isn't on the first page, pull more pages
+  // (a few tries max) until it shows up.
+  const focusAttempts = useRef(0);
+  // Scroll to the focused post only ONCE per navigation — after that the
+  // user owns the scroll position (feed refetches must not drag them back).
+  const focusScrolled = useRef(false);
+  useEffect(() => {
+    focusAttempts.current = 0;
+    focusScrolled.current = false;
+  }, [focusPost]);
+
+  // Deep-link from a notification: fetch the exact post directly and pin it
+  // at the top of the feed, so the user lands on it immediately — no matter
+  // how far down the chronological feed it lives. The rest of the feed
+  // loads below as usual.
+  const focusDbId = focusPost?.startsWith('db-') ? Number(focusPost.slice(3)) : null;
+  const focusInFeed = focusDbId != null && apiPosts.some((p) => p.dbId === focusDbId);
+  // Always fetch the target directly — the feed's cached pages may briefly
+  // still contain a post the server already filters out (hidden/deleted),
+  // which would otherwise disable this fetch and lose the redirect.
+  const focusPostQ = trpc.post.getById.useQuery(
+    { id: focusDbId ?? 0 },
+    { enabled: focusDbId != null, retry: false },
+  );
+  const pinnedPost =
+    !focusInFeed && focusPostQ.data ? toUiPost(focusPostQ.data as ApiPost) : null;
+
+  // The notification's target post can't be shown (deleted, or hidden by a
+  // block) — tell the user gently instead of silently landing on the feed.
+  const focusMissing =
+    focusDbId != null &&
+    !focusInFeed &&
+    focusPostQ.isSuccess &&
+    focusPostQ.data == null;
+  const [missingDismissed, setMissingDismissed] = useState(false);
+  useEffect(() => {
+    setMissingDismissed(false);
+  }, [focusPost]);
+
+  useEffect(() => {
+    if (!focusPost || focusScrolled.current) return;
+    const el = document.getElementById(`post-${focusPost}`);
+    if (el) {
+      focusScrolled.current = true;
+      const t = window.setTimeout(() => {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 200);
+      return () => window.clearTimeout(t);
+    }
+    if (feedLoading || focusPostQ.isLoading || pinnedPost) return;
+    if (hasMore && !loadingMore && focusAttempts.current < 5) {
+      focusAttempts.current += 1;
+      loadMore();
+    }
+  }, [focusPost, feedLoading, apiPosts, hasMore, loadingMore, loadMore, pinnedPost, focusPostQ.isLoading]);
+
+  const needAuth = () =>
+    toast('Sign in to do that.', {
+      action: { label: 'Sign in', onClick: () => navigate('/login') },
+    });
+
+  const updateMutation = trpc.post.update.useMutation({
+    onSuccess: () => utils.post.list.invalidate(),
+    onError: () => toast('That change did not save — please try again.'),
+  });
+  const deleteMutation = trpc.post.delete.useMutation({
+    onSuccess: () => utils.post.list.invalidate(),
+    onError: () => toast('The post could not be deleted — please try again.'),
+  });
 
   const updatePost = (id: string, patch: Partial<Post>) => {
-    setUserPosts((prev) => {
-      const next = prev.map((p) => (p.id === id ? { ...p, ...patch } : p));
-      try {
-        localStorage.setItem(USER_POSTS_KEY, JSON.stringify(next));
-      } catch {
-        /* ignore */
-      }
-      return next;
+    const target =
+      apiPosts.find((p) => p.id === id) ?? (pinnedPost?.id === id ? pinnedPost : undefined);
+    if (target?.dbId == null) return;
+    updateMutation.mutate({
+      id: target.dbId,
+      // Key presence matters, not the value: PostCard passes `undefined`
+      // to mean "clear this field", and that must still reach the server.
+      ...('title' in patch && patch.title ? { title: patch.title } : {}),
+      ...('body' in patch && patch.body ? { body: patch.body } : {}),
+      ...('emotions' in patch ? { emotions: patch.emotions ?? [] } : {}),
+      ...('supportPreference' in patch
+        ? { supportPreference: patch.supportPreference ?? null }
+        : {}),
+      ...('image' in patch ? { image: patch.image ?? null } : {}),
     });
   };
 
   const posts = useMemo(
-    () => [...userPosts, ...SEED_POSTS].filter((p) => !hiddenPostIds.includes(p.id)),
-    [userPosts, hiddenPostIds],
+    () => apiPosts.filter((p) => !hiddenPostIds.includes(p.id)),
+    [apiPosts, hiddenPostIds],
   );
 
   const deletePost = (id: string) => {
-    setHiddenPostIds((prev) => [...prev, id]);
-    setUserPosts((prev) => {
-      const next = prev.filter((p) => p.id !== id);
-      if (next.length !== prev.length) {
-        localStorage.setItem(USER_POSTS_KEY, JSON.stringify(next));
-      }
-      return next;
-    });
+    const target =
+      apiPosts.find((p) => p.id === id) ?? (pinnedPost?.id === id ? pinnedPost : undefined);
+    if (target?.mine && target.dbId != null) {
+      deleteMutation.mutate({ id: target.dbId });
+      toast('Post deleted. Take care of yourself.');
+    } else {
+      // Not your post — hide it from your own view only.
+      setHiddenPostIds((prev) => [...prev, id]);
+      toast('Post hidden from your feed.');
+    }
   };
 
   const dismissBanner = () => {
-    sessionStorage.setItem(BANNER_KEY, '1');
     setBannerVisible(false);
   };
 
-  const autoGrow = () => {
-    const el = textareaRef.current;
-    if (!el) return;
-    el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+  /* Community quotes carousel — consent-gated highlights, hug counts are
+     seeded locally (these are curated words, not live posts). */
+  const communityQuotes = useMemo<CommunityQuote[]>(
+    () =>
+      HIGHLIGHTS.filter((h) => h.consent_given).map((h, i) => ({
+        id: h.id,
+        text: h.text,
+        authorAlias: h.anonymous ? 'Anonymous' : h.author,
+        hugs: [18, 26, 12, 21, 9][i % 5],
+      })),
+    [],
+  );
+
+  const carouselPrefMutation = trpc.settings.updatePrefs.useMutation({
+    onSuccess: () => utils.profile.get.invalidate(),
+  });
+  const carouselHidden = isAuthenticated
+    ? (profile?.uiPrefs?.communityCarouselHidden ?? false)
+    : undefined; // unauthenticated — component uses localStorage
+  const onCarouselHiddenChange = (hidden: boolean) => {
+    if (!isAuthenticated) return;
+    carouselPrefMutation.mutate({ uiPrefs: { communityCarouselHidden: hidden } });
+  };
+  const onCarouselHug = (_quoteId: string) => {
+    // Curated quotes have no backend post to hug — the counter is
+    // optimistic in-component by design.
   };
 
-  const share = () => {
-    const body = text.trim();
-    if (!body && !draftImage) return;
-    const chipDef = COMPOSER_MOODS.find((c) => c.label === chip);
-    const meta = chipDef ? moodMeta(chipDef.mood) : null;
-    const firstLine = body.split('\n')[0];
-    const post: Post = {
-      id: `user-${Date.now()}`,
-      author: 'Me',
-      avatarColor: '#7FA8C9',
-      time: 'now',
-      moodChip: chip && meta ? { label: chip, bg: meta.chipBg, text: meta.chipText } : undefined,
-      title: firstLine.length > 60 ? `${firstLine.slice(0, 60)}…` : firstLine || 'A quiet share',
-      body,
-      ...(draftImage ? { image: draftImage } : {}),
-      ...(audienceLabels(audience).length ? { audience: audienceLabels(audience) } : {}),
-      hugs: 0,
-      replies: 0,
-    };
-    const next = [post, ...userPosts];
-    setUserPosts(next);
-    try {
-      localStorage.setItem(USER_POSTS_KEY, JSON.stringify(next));
-    } catch {
-      /* image too large to persist — post stays for this session */
-    }
-    setText('');
-    setChip(null);
-    setDraftImage(null);
-    setAudience(DEFAULT_AUDIENCE);
-    setJustShared(true);
-    if (textareaRef.current) textareaRef.current.style.height = 'auto';
-    window.setTimeout(() => setJustShared(false), 2600);
+  const shareMutation = trpc.post.create.useMutation({
+    onSuccess: () => {
+      utils.post.list.invalidate();
+      utils.profile.stats.invalidate();
+      toast('Shared — thank you for letting it out.');
+    },
+    onError: (err) => {
+      if (err.data?.code === 'UNAUTHORIZED') needAuth();
+      else toast('Your post could not be shared — please try again.');
+    },
+  });
+
+  const handleComposerSubmit = (data: LetItOutSubmit) => {
+    if (!isAuthenticated) return needAuth();
+    const firstLine = data.body.split('\n')[0];
+    shareMutation.mutate({
+      title:
+        data.title ??
+        (firstLine.length > 60 ? `${firstLine.slice(0, 60)}…` : firstLine || 'A quiet share'),
+      body: data.body,
+      ...(data.emotions.length ? { emotions: data.emotions } : {}),
+      ...(data.supportPreference ? { supportPreference: data.supportPreference } : {}),
+      ...(audienceLabels(data.audience).length ? { audience: audienceLabels(data.audience) } : {}),
+      ...(data.image ? { image: data.image } : {}),
+    });
   };
 
-  // Whole-section kill switch from Settings — respected instantly.
-  const inspireEnabled = useMemo(() => {
-    try {
-      const s = JSON.parse(localStorage.getItem('haven.settings') ?? '{}') as { inspireSection?: boolean };
-      return s.inspireSection !== false;
-    } catch {
-      return true;
-    }
-  }, []);
+  // The inspire section is curated editorial content; each card can be
+  // dismissed individually inside the section itself.
+  const inspireEnabled = true;
 
   return (
     <div className="mx-auto w-full">
@@ -216,8 +235,8 @@ export default function Home() {
             transition={{ duration: 0.4, delay: 0.15, ease: [0.22, 1, 0.36, 1] }}
             className="mb-6"
           >
-            <div className="flex items-start gap-3 rounded-2xl bg-haven-primary-soft p-4">
-              <Leaf size={20} strokeWidth={1.75} className="mt-0.5 shrink-0 text-haven-primary" />
+            <div className="flex items-start gap-3 rounded-xl border border-haven-border border-l-[3px] border-l-haven-primary bg-white p-4 shadow-card">
+              <Leaf size={20} strokeWidth={1.75} className="mt-0.5 shrink-0 text-haven-text-muted" />
               <p className="flex-1 text-[15px] leading-relaxed text-haven-text">
                 <span className="font-semibold">A gentle reminder:</span> This is a judgment-free
                 space. Share as much or as little as you like — you're among friends here.
@@ -238,6 +257,16 @@ export default function Home() {
       {/* 0. Inspirational top section */}
       {inspireEnabled && <InspireSection />}
 
+      {/* 0.5 Community quotes, shared with permission */}
+      {inspireEnabled && communityQuotes.length > 0 && (
+        <CommunityCarousel
+          quotes={communityQuotes}
+          onHug={onCarouselHug}
+          {...(carouselHidden !== undefined ? { hidden: carouselHidden } : {})}
+          onHiddenChange={onCarouselHiddenChange}
+        />
+      )}
+
       {/* 2. Extra-care card slot */}
       {showCareCard && (
         <div className="mb-6">
@@ -245,196 +274,104 @@ export default function Home() {
         </div>
       )}
 
-      {/* 3. Today's check-in strip */}
-      <h2 className="mb-3 font-serif text-[22px] font-medium text-haven-text">Daily check in</h2>
-      <motion.section
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.35, delay: 0.2, ease: [0.22, 1, 0.36, 1] }}
-        className="mb-6 rounded-2xl border border-haven-border bg-white p-5 shadow-card"
-      >
-        {todayMeta ? (
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-[15px] text-haven-text">
-              Today you're feeling{' '}
-              <span className="font-semibold" style={{ color: todayMeta.chipText }}>
-                {todayMeta.shortLabel}
-              </span>{' '}
-              <span aria-hidden>{todayMeta.emoji}</span>
-            </p>
-            <button
-              type="button"
-              onClick={() => openCheckIn()}
-              className="text-[15px] font-medium text-haven-primary hover:text-haven-primary-hover"
-            >
-              edit
-            </button>
-          </div>
-        ) : (
-          <>
-            <h2 className="font-serif text-[22px] font-medium text-haven-text">
-              How are you feeling today?
-            </h2>
-            <div className="mt-3 flex items-center gap-2">
-              {MOODS.map((m, i) => (
-                <motion.button
-                  key={m.value}
-                  type="button"
-                  initial={{ opacity: 0, scale: 0.8 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  transition={{ delay: 0.25 + i * 0.05, type: 'spring', stiffness: 300, damping: 16 }}
-                  whileHover={{ y: -3, rotate: i % 2 === 0 ? -4 : 4 }}
-                  onClick={() => openCheckIn({ initialMood: m.value, initialNote: checkInNote.trim() || undefined })}
-                  aria-label={m.label}
-                  title={m.label}
-                  className="flex h-11 w-11 items-center justify-center rounded-full text-2xl transition-colors hover:bg-haven-canvas"
-                >
-                  {m.emoji}
-                </motion.button>
-              ))}
-              <span className="ml-2 text-[13px] text-haven-text-muted">
-                takes 10 seconds, only you can see it
-              </span>
-            </div>
-            <input
-              type="text"
-              value={checkInNote}
-              onChange={(e) => setCheckInNote(e.target.value.slice(0, 280))}
-              maxLength={280}
-              placeholder="Add a little note if you'd like… (optional)"
-              className="mt-3 w-full rounded-xl border border-haven-border bg-haven-canvas px-3 py-2 text-[14px] text-haven-text placeholder:text-haven-text-muted/70 focus:outline-none focus:ring-2 focus:ring-haven-primary/40"
+      {/* 3. Today's check-in — disappears completely once today's mood is
+          logged; it lives in the Mood tracker after that. */}
+      {!todayMeta && (
+        <>
+          <h2 className="mb-3 font-serif text-[22px] font-medium text-haven-text">Daily check in</h2>
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.35, delay: 0.2, ease: [0.22, 1, 0.36, 1] }}
+            className="mb-6"
+          >
+            <DailyCheckInCard
+              streak={streak}
+              onSubmit={(mood, note) => {
+                if (!isAuthenticated) return needAuth();
+                saveCheckIn(todayKey(), mood as MoodValue, note);
+                toast('Check-in saved — only you can see it.');
+              }}
             />
-          </>
-        )}
-      </motion.section>
+          </motion.div>
+        </>
+      )}
 
       {/* 4. Composer */}
       <h2 className="mb-3 font-serif text-[22px] font-medium text-haven-text">Let it out</h2>
-      <motion.section
+      <motion.div
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.35, delay: 0.3, ease: [0.22, 1, 0.36, 1] }}
-        className="mb-8 rounded-2xl border border-haven-border bg-white p-5 shadow-card transition-shadow duration-200 focus-within:shadow-card-hover"
+        className="mb-8"
       >
-        <div className="flex gap-3">
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#8B7BC7] text-sm font-semibold text-white">
-            M
-          </span>
-          <textarea
-            ref={textareaRef}
-            value={text}
-            onChange={(e) => {
-              setText(e.target.value);
-              autoGrow();
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                share();
-              }
-            }}
-            rows={2}
-            placeholder="How are you feeling today? It's okay to not be okay…"
-            className="w-full resize-none rounded-xl border border-haven-border bg-haven-canvas px-3 py-2 text-[15px] leading-relaxed text-haven-text transition-colors duration-200 placeholder:text-haven-text-muted/70 focus:outline-none focus:ring-2 focus:ring-haven-primary/40"
-          />
-        </div>
-        <div className="mt-3 flex flex-wrap items-center gap-2 pl-[52px]">
-          {COMPOSER_MOODS.map((c) => {
-            const meta = moodMeta(c.mood);
-            const active = chip === c.label;
-            return (
-              <button
-                key={c.label}
-                type="button"
-                onClick={() => setChip(active ? null : c.label)}
-                aria-pressed={active}
-                className={cn(
-                  'rounded-full border px-3 py-1 text-[13px] font-medium transition-all duration-200 ease-soft',
-                  active
-                    ? 'border-transparent'
-                    : 'border-haven-border bg-white text-haven-text-muted hover:bg-haven-canvas',
-                )}
-                style={active ? { backgroundColor: meta.chipBg, color: meta.chipText } : undefined}
-              >
-                {c.label}
-              </button>
-            );
-          })}
-          <button
-            type="button"
-            onClick={() => imageInputRef.current?.click()}
-            aria-label="Add a photo or GIF"
-            title="Add a photo or GIF"
-            className="flex items-center gap-1.5 rounded-full border border-haven-border bg-white px-3 py-1 text-[13px] font-medium text-haven-text-muted transition-all duration-200 ease-soft hover:border-haven-primary/40 hover:text-haven-primary"
-          >
-            <ImagePlus size={14} strokeWidth={1.75} />
-            Photo/GIF
-          </button>
-          <input
-            ref={imageInputRef}
-            type="file"
-            accept="image/*,.gif"
-            className="hidden"
-            onChange={pickDraftImage}
-          />
-          <button
-            type="button"
-            onClick={share}
-            disabled={!text.trim() && !draftImage}
-            className="ml-auto rounded-full bg-haven-primary px-5 py-1.5 text-[13px] font-semibold text-white transition-all duration-200 ease-soft hover:bg-haven-primary-hover disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            Share
-          </button>
-        </div>
-        <AudiencePicker value={audience} onChange={setAudience} />
-        <AnimatePresence>
-          {draftImage && (
-            <motion.div
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 6 }}
-              transition={{ duration: 0.25 }}
-              className="relative ml-[52px] mt-3 w-fit"
-            >
-              <img
-                src={draftImage}
-                alt="Attached preview"
-                className="max-h-40 rounded-xl border border-haven-border object-cover"
-              />
-              <button
-                type="button"
-                onClick={() => setDraftImage(null)}
-                aria-label="Remove attachment"
-                className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-white text-haven-text shadow-card transition-colors hover:text-haven-danger"
-              >
-                <X size={13} strokeWidth={2} />
-              </button>
-            </motion.div>
-          )}
-        </AnimatePresence>
-        <AnimatePresence>
-          {justShared && (
-            <motion.p
-              initial={{ opacity: 0, y: 4 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-              className="mt-2 flex items-center gap-1.5 pl-[52px] text-[13px] font-medium text-haven-primary"
-            >
-              <Check size={14} strokeWidth={2} /> Shared — thank you for letting it out.
-            </motion.p>
-          )}
-        </AnimatePresence>
-        <p className="mt-2 pl-[52px] text-[13px] text-haven-text-muted">
-          Posts are anonymous by default. Press Enter to share, Shift+Enter for a new line.
-        </p>
-      </motion.section>
+        <LetItOutComposer
+          {...(todayEntry?.mood ? { todayMood: todayEntry.mood } : {})}
+          avatarInitial={(profile?.displayName ?? 'M').charAt(0).toUpperCase()}
+          avatarColor={profile?.avatarColor ?? '#8B7BC7'}
+          onSubmit={handleComposerSubmit}
+          submitting={shareMutation.isPending}
+        />
+      </motion.div>
 
       {/* 5. Feed */}
-      {posts.length === 0 ? (
-        <div className="flex flex-col items-center rounded-2xl border border-haven-border bg-white px-6 py-12 text-center shadow-card">
+      <h2 className="mb-3 font-serif text-[22px] font-medium text-haven-text">
+        Every voice here matter
+      </h2>
+      {/* The notification's target is gone (deleted or hidden by a block) —
+          say so gently instead of landing on the feed with no explanation. */}
+      {focusMissing && !missingDismissed && (
+        <div className="mb-4 flex items-start gap-3 rounded-xl border border-haven-border border-l-[3px] border-l-haven-primary bg-white p-4 shadow-card">
+          <Leaf size={18} strokeWidth={1.75} className="mt-0.5 shrink-0 text-haven-text-muted" />
+          <p className="flex-1 text-sm leading-relaxed text-haven-text">
+            That post is no longer available — it may have been removed, or the
+            author isn't sharing it with you anymore.
+          </p>
+          <button
+            type="button"
+            onClick={() => setMissingDismissed(true)}
+            aria-label="Dismiss notice"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-haven-text-muted transition-colors hover:bg-haven-canvas"
+          >
+            <X size={15} strokeWidth={1.75} />
+          </button>
+        </div>
+      )}
+      {/* Pinned deep-link target — fetched directly so a notification always
+          lands on its exact post, even if it's pages deep in the feed. */}
+      {pinnedPost && (
+        <div className="mb-4">
+          <PostCard
+            post={pinnedPost}
+            index={0}
+            onDelete={deletePost}
+            onUpdate={updatePost}
+            autoOpenComments
+            highlighted
+            focusReplyId={focusReply}
+          />
+        </div>
+      )}
+      {feedLoading ? (
+        <div className="space-y-4 pb-12" aria-label="Loading posts">
+          {[0, 1].map((i) => (
+            <div key={i} className="animate-pulse rounded-xl border border-haven-border bg-white p-5 shadow-card">
+              <div className="flex items-center gap-3">
+                <span className="h-10 w-10 rounded-full bg-haven-border/50" />
+                <div className="flex-1 space-y-1.5">
+                  <div className="h-3 w-28 rounded bg-haven-border/50" />
+                  <div className="h-3 w-16 rounded bg-haven-border/40" />
+                </div>
+              </div>
+              <div className="mt-4 h-3 w-2/3 rounded bg-haven-border/50" />
+              <div className="mt-2 h-3 w-full rounded bg-haven-border/40" />
+            </div>
+          ))}
+        </div>
+      ) : posts.length === 0 ? (
+        <div className="flex flex-col items-center rounded-xl border border-haven-border bg-white px-6 py-12 text-center shadow-card">
           <img src="/empty-feed.svg" alt="" className="w-60" />
-          <h3 className="mt-4 font-serif text-xl font-medium text-haven-text">
+          <h3 className="mt-4 text-xl font-medium text-haven-text">
             It's quiet here right now.
           </h3>
           <p className="mt-1 text-sm text-haven-text-muted">
@@ -442,7 +379,7 @@ export default function Home() {
           </p>
         </div>
       ) : (
-        <div className="space-y-6 pb-12">
+        <div className="space-y-4 pb-12">
           {posts.map((post, i) => (
             <PostCard
               key={post.id}
@@ -452,8 +389,21 @@ export default function Home() {
               onUpdate={updatePost}
               autoOpenComments={post.id === focusPost}
               highlighted={post.id === focusPost}
+              focusReplyId={post.id === focusPost ? focusReply : undefined}
             />
           ))}
+          {hasMore && (
+            <div className="flex justify-center pt-2">
+              <button
+                type="button"
+                onClick={loadMore}
+                disabled={loadingMore}
+                className="rounded-full border border-haven-border bg-white px-6 py-2.5 text-sm font-semibold text-haven-text shadow-card transition-colors hover:border-haven-primary/40 hover:text-haven-primary disabled:opacity-50"
+              >
+                {loadingMore ? 'Loading…' : 'Load older posts'}
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

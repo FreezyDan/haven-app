@@ -30,7 +30,7 @@ export default function ExtraCareCard({ onOpenCrisis, onDismiss }: ExtraCareCard
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.7, delay: 0.4, ease: [0.22, 1, 0.36, 1] }}
-      className="relative overflow-hidden rounded-2xl border border-haven-border p-6"
+      className="relative overflow-hidden rounded-xl border border-haven-border p-6"
       style={{ background: 'linear-gradient(135deg, #FDF6EC 0%, #EAEAFF 100%)' }}
       aria-label="A little extra care"
     >
@@ -58,7 +58,7 @@ export default function ExtraCareCard({ onOpenCrisis, onDismiss }: ExtraCareCard
             A little extra care
           </span>
         </div>
-        <h3 className="mt-3 font-serif text-[22px] font-medium leading-snug text-haven-text">
+        <h3 className="mt-3 text-[22px] font-medium leading-snug text-haven-text">
           We've noticed things have felt heavy lately.
         </h3>
         <p className="mt-2 max-w-md text-sm leading-relaxed text-haven-text-muted">

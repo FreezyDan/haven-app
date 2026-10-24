@@ -1,0 +1,28 @@
+== 1. npm run check ==
+PASS
+== 2. npm run build ==
+PASS
+== 3. schema tables ==
+PASS posts
+PASS replies
+PASS postReactions
+PASS postHugs
+PASS replyHugs
+PASS savedPosts
+PASS safetyReports
+PASS reportEvents
+== 5. routers registered ==
+PASS post
+PASS reply
+PASS reaction
+PASS moderation
+== 6. unique keys ==
+PASS uq_reaction
+PASS uq_post_hug
+PASS uq_reply_hug
+PASS uq_saved
+PASS uq_open_report
+== 7. frontend uses trpc ==
+FAIL
+verifier exit: 0
+correction: true verifier exit code = 1 (criterion 7 pending — frontend wiring is the next slice)

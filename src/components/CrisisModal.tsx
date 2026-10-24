@@ -106,7 +106,7 @@ export default function CrisisModal({ open, onOpenChange, fromCareCard = false }
                     <Wind size={28} strokeWidth={1.75} className="text-haven-primary" />
                   </motion.div>
                 </div>
-                <p className="font-serif text-xl font-medium text-haven-text">{BREATH_STEPS[breathStep]}</p>
+                <p className="text-xl font-medium text-haven-text">{BREATH_STEPS[breathStep]}</p>
                 <p className="mt-1 text-sm text-haven-text-muted">Follow the circle. You're doing fine.</p>
                 <button
                   type="button"
@@ -126,7 +126,7 @@ export default function CrisisModal({ open, onOpenChange, fromCareCard = false }
                   <span className="flex h-11 w-11 items-center justify-center rounded-full bg-haven-danger/15 text-haven-danger">
                     <AlertTriangle size={22} strokeWidth={1.75} />
                   </span>
-                  <h2 className="mt-3 font-serif text-2xl font-medium text-haven-text">
+                  <h2 className="mt-3 text-2xl font-medium text-haven-text">
                     You matter. Help is here right now.
                   </h2>
                   <p className="mt-1.5 text-sm leading-relaxed text-haven-text-muted">
@@ -138,7 +138,7 @@ export default function CrisisModal({ open, onOpenChange, fromCareCard = false }
                 <div className="space-y-2.5 px-6 py-5">
                   <a
                     href="tel:988"
-                    className="flex items-center gap-3 rounded-2xl border border-haven-danger/30 bg-white p-4 transition-all duration-200 ease-soft hover:border-haven-danger hover:bg-haven-danger-soft/50"
+                    className="flex items-center gap-3 rounded-xl border border-haven-danger/30 bg-white p-4 transition-all duration-200 ease-soft hover:border-haven-danger hover:bg-haven-danger-soft/50"
                   >
                     <Phone size={20} strokeWidth={1.75} className="shrink-0 text-haven-danger" />
                     <span>
@@ -150,7 +150,7 @@ export default function CrisisModal({ open, onOpenChange, fromCareCard = false }
                   </a>
                   <a
                     href="sms:741741"
-                    className="flex items-center gap-3 rounded-2xl border border-haven-danger/30 bg-white p-4 transition-all duration-200 ease-soft hover:border-haven-danger hover:bg-haven-danger-soft/50"
+                    className="flex items-center gap-3 rounded-xl border border-haven-danger/30 bg-white p-4 transition-all duration-200 ease-soft hover:border-haven-danger hover:bg-haven-danger-soft/50"
                   >
                     <MessageSquareText size={20} strokeWidth={1.75} className="shrink-0 text-haven-danger" />
                     <span>
@@ -160,7 +160,7 @@ export default function CrisisModal({ open, onOpenChange, fromCareCard = false }
                   </a>
                   <a
                     href="tel:911"
-                    className="flex items-center gap-3 rounded-2xl border border-haven-danger/30 bg-white p-4 transition-all duration-200 ease-soft hover:border-haven-danger hover:bg-haven-danger-soft/50"
+                    className="flex items-center gap-3 rounded-xl border border-haven-danger/30 bg-white p-4 transition-all duration-200 ease-soft hover:border-haven-danger hover:bg-haven-danger-soft/50"
                   >
                     <Phone size={20} strokeWidth={1.75} className="shrink-0 text-haven-danger" />
                     <span>
@@ -205,7 +205,7 @@ export default function CrisisModal({ open, onOpenChange, fromCareCard = false }
                     <motion.p
                       initial={{ opacity: 0, y: 6 }}
                       animate={{ opacity: 1, y: 0 }}
-                      className="pt-1 text-center font-serif text-[15px] text-haven-text"
+                      className="pt-1 text-center text-[15px] text-haven-text"
                     >
                       You made it through that minute. That's something. 💚
                     </motion.p>
