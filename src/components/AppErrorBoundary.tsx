@@ -7,16 +7,20 @@ import { Component, type ReactNode } from 'react';
  */
 export default class AppErrorBoundary extends Component<
   { children: ReactNode },
-  { hasError: boolean }
+  { hasError: boolean; message?: string; componentStack?: string }
 > {
-  state = { hasError: false };
+  state: { hasError: boolean; message?: string; componentStack?: string } = { hasError: false };
 
   static getDerivedStateFromError() {
     return { hasError: true };
   }
 
-  componentDidCatch(error: unknown) {
-    console.error('App render error:', error);
+  componentDidCatch(error: unknown, info: { componentStack?: string }) {
+    console.error('App render error:', error, info.componentStack);
+    this.setState({
+      message: error instanceof Error ? error.message : String(error),
+      componentStack: info.componentStack,
+    });
   }
 
   render() {
@@ -29,6 +33,12 @@ export default class AppErrorBoundary extends Component<
         <p className="mt-2 max-w-sm text-sm text-haven-text-muted">
           The page hit an unexpected error. A quick reload usually brings it back.
         </p>
+        {this.state.message && (
+          <pre className="mt-3 max-w-xl whitespace-pre-wrap rounded-lg bg-haven-canvas p-3 text-left text-[12px] text-haven-text-muted">
+            {this.state.message}
+            {this.state.componentStack ? `\n\n${this.state.componentStack}` : ''}
+          </pre>
+        )}
         <button
           type="button"
           onClick={() => window.location.reload()}

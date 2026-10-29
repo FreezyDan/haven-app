@@ -219,8 +219,7 @@ export default function SafetyReportDialog({ open, onClose, targetType, targetId
                     <p className="text-[12px] font-medium text-haven-text-muted">Reporting</p>
                     <p className="mt-0.5 text-[15px] font-semibold text-[#292524]">{selected.label}</p>
                     <p className="mt-1 text-[13px] text-haven-text-muted">
-                      Priority: <span className="font-medium capitalize">{selected.priority}</span> · Post by{' '}
-                      {postSnapshot.author} — “{postSnapshot.title}”
+                      Post by {postSnapshot.author} — “{postSnapshot.title}”
                     </p>
                   </div>
                   <label className="mt-4 block">
@@ -269,7 +268,7 @@ export default function SafetyReportDialog({ open, onClose, targetType, targetId
                   Thank you — your report is in the queue.
                 </p>
                 <p className="mx-auto mt-1.5 max-w-[340px] text-[13px] leading-relaxed text-haven-text-muted">
-                  A moderator will review it as {selected.priority === 'high' ? 'a high-priority case' : 'soon as they can'}.
+                  A moderator will review it as soon as they can. Every report matters.
                   Reports are reviewed by people, never auto-actioned. You won't be identified to the author.
                 </p>
                 <button

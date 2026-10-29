@@ -15,7 +15,10 @@ import {
   listReplies,
   listReportEvents,
   listReports,
+  listModerationMessages,
   logReportEvent,
+  markModerationMessagesRead,
+  sendModerationMessage,
   saveOnboardingStep,
   setReportStatus,
   softDeletePost,
@@ -30,6 +33,7 @@ import {
 } from "./queries/community";
 import { createStory, listApprovedStories, listPendingStories, reviewStory } from "./queries/stories";
 import { ensureAlias } from "./queries/alias";
+import { env } from "./lib/env";
 
 const emotionList = z.array(z.string().min(1).max(30)).max(8);
 
@@ -74,7 +78,7 @@ export const profileRouter = createRouter({
         avatarUrl: z.string().max(4_000_000).optional(),
         interests: z.array(z.string().max(40)).max(20),
         isPrivate: z.boolean(),
-        dmPolicy: z.enum(["everyone", "mutuals", "nobody"]),
+        dmPolicy: z.enum(["everyone", "mutuals", "requests", "nobody"]),
         notifPrefs: z.object({
           replies: z.boolean(),
           reactions: z.boolean(),
@@ -118,6 +122,7 @@ export const postRouter = createRouter({
         audience: z.array(z.string().max(60)).max(20).optional(),
         emotions: emotionList.optional(),
         supportPreference: z.enum(["listen", "advice", "experience"]).optional(),
+        commentsDisabled: z.boolean().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -135,6 +140,7 @@ export const postRouter = createRouter({
         emotions: emotionList.nullish(),
         supportPreference: z.enum(["listen", "advice", "experience"]).nullish(),
         image: z.string().max(3_000_000).nullish(),
+        commentsDisabled: z.boolean().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -146,6 +152,7 @@ export const postRouter = createRouter({
           ? { supportPreference: input.supportPreference }
           : {}),
         ...(input.image !== undefined ? { image: input.image } : {}),
+        ...(input.commentsDisabled !== undefined ? { commentsDisabled: input.commentsDisabled } : {}),
       });
       return { ok: true };
     }),
@@ -226,7 +233,7 @@ export const moderationRouter = createRouter({
   file: authedQuery
     .input(
       z.object({
-        targetType: z.enum(["post", "reply"]),
+        targetType: z.enum(["post", "reply", "conversation"]),
         targetId: z.number().int().positive(),
         targetSnapshot: z.object({
           author: z.string().max(60),
@@ -284,6 +291,26 @@ export const moderationRouter = createRouter({
       await logReportEvent(input.id, ctx.user.id, input.action);
       return { ok: true };
     }),
+
+  // Admin composes; Haven Moderation delivers. The member never sees who sent it.
+  contactAuthor: adminQuery
+    .input(z.object({ reportId: z.number().int().positive(), message: z.string().trim().min(1).max(2000) }))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        return await sendModerationMessage(input.reportId, ctx.user.id, input.message);
+      } catch (error) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: error instanceof Error ? error.message : "Message could not be sent",
+        });
+      }
+    }),
+
+  // Member-facing official inbox (read-only, no moderator identity).
+  myMessages: authedQuery.query(({ ctx }) => listModerationMessages(ctx.user.id)),
+  markMyMessagesRead: authedQuery.mutation(({ ctx }) => markModerationMessagesRead(ctx.user.id)),
+  // Public sender label only — never expose the API key.
+  emailSender: publicQuery.query(() => env.resendFromEmail || null),
 });
 
 /* --------------------------- community stories --------------------------- */
@@ -320,10 +347,11 @@ export const storyRouter = createRouter({
       z.object({
         id: z.number().int().positive(),
         decision: z.enum(["approved", "rejected"]),
+        note: z.string().trim().max(2000).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      await reviewStory(input.id, ctx.user.id, input.decision);
+      await reviewStory(input.id, ctx.user.id, input.decision, input.note);
       return { ok: true };
     }),
 });

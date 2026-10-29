@@ -20,6 +20,8 @@ export interface LetItOutSubmit {
   audience: AudienceSelection;
   /** Attached image/GIF as a data URL. */
   image?: string;
+  /** Prevent anyone from commenting on this post. */
+  commentsDisabled?: boolean;
 }
 
 export interface LetItOutComposerProps {
@@ -113,6 +115,7 @@ export default function LetItOutComposer({
     moodKind === 'low' ? ['Sad'] : moodKind === 'rough' ? ['Overwhelmed'] : [],
   );
   const [respond, setRespond] = useState<RespondPreference | null>(null);
+  const [commentsDisabled, setCommentsDisabled] = useState(false);
   const [audience, setAudience] = useState<AudienceSelection>(DEFAULT_AUDIENCE);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -147,11 +150,13 @@ export default function LetItOutComposer({
       emotions,
       ...(respond ? { supportPreference: respond } : {}),
       audience,
+      commentsDisabled,
       ...(image ? { image } : {}),
     });
     setTitle('');
     setBody('');
     setImage(null);
+    setCommentsDisabled(false);
     setEmotions(moodKind === 'low' ? ['Sad'] : moodKind === 'rough' ? ['Overwhelmed'] : []);
     setRespond(null);
     setAudience(DEFAULT_AUDIENCE);
@@ -255,6 +260,15 @@ export default function LetItOutComposer({
           </div>
           {/* Who can see this post */}
           <AudiencePicker value={audience} onChange={setAudience} />
+          <label className="mt-3 flex items-center gap-2 text-[13px] text-haven-text-muted">
+            <input
+              type="checkbox"
+              checked={commentsDisabled}
+              onChange={(e) => setCommentsDisabled(e.target.checked)}
+              className="h-4 w-4 accent-haven-primary"
+            />
+            Turn off comments
+          </label>
         </div>
       </div>
 

@@ -2,6 +2,9 @@ import { Routes, Route } from 'react-router';
 import Layout from '@/components/Layout';
 import Home from '@/pages/Home';
 import Notifications from '@/pages/Notifications';
+import PostDetail from '@/pages/PostDetail';
+import SupportMessages from '@/pages/SupportMessages';
+import Mutuals from '@/pages/Mutuals';
 import Chats from '@/pages/Chats';
 import Journal from '@/pages/Journal';
 import MoodTracker from '@/pages/Mood';
@@ -48,6 +51,9 @@ export default function App() {
       >
         <Route index element={<Home />} />
         <Route path="notifications" element={<Notifications />} />
+        <Route path="post/:id" element={<PostDetail />} />
+        <Route path="support-messages" element={<SupportMessages />} />
+        <Route path="mutuals" element={<Mutuals />} />
         <Route path="chats" element={<Chats />} />
         <Route path="journal" element={<Journal />} />
         <Route path="mood" element={<MoodTracker />} />
@@ -55,6 +61,7 @@ export default function App() {
         <Route path="blogs/:id" element={<BlogPost />} />
         <Route path="stories" element={<Stories />} />
         <Route path="profile" element={<Profile />} />
+        <Route path="u/id/:id" element={<PublicProfile />} />
         <Route path="u/:username" element={<PublicProfile />} />
         <Route path="settings" element={<Settings />} />
         <Route path="moderation" element={<Moderation />} />

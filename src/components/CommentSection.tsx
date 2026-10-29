@@ -21,6 +21,7 @@ import { toast } from 'sonner';
 import { readImageFile } from '@/components/PostCard';
 import EmojiPickerButton, { insertAtCaret } from '@/components/EmojiPicker';
 import SafetyReportDialog from '@/components/SafetyReportDialog';
+import BlockConfirmDialog from '@/components/BlockConfirmDialog';
 import ReportDialog, { type ReportCategory } from '@/components/ReportDialog';
 import { relativeTime } from '@/lib/havenData';
 import { avatarColorFor } from '@/lib/avatarColor';
@@ -45,6 +46,7 @@ export interface Reply {
   author: string;
   avatarColor: string;
   time: string;
+  createdAt: Date;
   body: string;
   image?: string | null;
   own?: boolean;
@@ -93,6 +95,7 @@ function toUiReply(r: ApiReply): Reply {
     author: r.authorName,
     avatarColor: r.avatarColor,
     time: relativeTime(r.createdAt),
+    createdAt: r.createdAt,
     body: r.body,
     image: r.image,
     own: r.own,
@@ -192,9 +195,9 @@ function ReplyComposer({
           type="button"
           onClick={() => fileRef.current?.click()}
           aria-label="Add a photo or GIF"
-          className="flex items-center gap-1 rounded-full px-2 py-1 text-[12px] font-medium text-haven-text-muted transition-colors hover:bg-white hover:text-haven-primary"
+          className="flex h-7 items-center gap-1 rounded-full px-2 py-0 text-[12px] font-medium leading-none text-haven-text-muted transition-colors hover:bg-white hover:text-haven-primary"
         >
-          <ImagePlus size={13} strokeWidth={1.75} />
+          <ImagePlus size={13} strokeWidth={1.75} className="shrink-0" />
           Photo/GIF
         </button>
         <input ref={fileRef} type="file" accept="image/*,.gif" className="hidden" onChange={pickImage} />
@@ -279,11 +282,14 @@ export default function CommentSection({
   postId,
   onCountChange,
   focusReplyId,
+  unreadReplies: initialUnreadReplies,
 }: {
   postId: number;
   onCountChange?: (n: number) => void;
   /** A reply to reveal, highlight, and scroll to (from a notification). */
   focusReplyId?: number;
+  /** Unread reply notifications carried from the notification that opened this post. */
+  unreadReplies?: { replyId: number; notificationId: number }[];
 }) {
   const navigate = useNavigate();
   const { isAuthenticated } = useAuth();
@@ -294,10 +300,32 @@ export default function CommentSection({
       action: { label: 'Sign in', onClick: () => navigate('/login') },
     });
 
-  const repliesQuery = trpc.reply.list.useQuery({ postId });
+  const repliesQuery = trpc.reply.list.useQuery(
+    { postId },
+    {
+      // Profile posts can finish loading before the reply request during a
+      // cold start. Retry transient failures before showing the error card,
+      // and always retry when the comments panel is opened again.
+      retry: 3,
+      retryDelay: (attempt) => Math.min(750 * 2 ** attempt, 4000),
+      refetchOnMount: 'always',
+      refetchOnWindowFocus: false,
+    },
+  );
   const replies: Reply[] = (repliesQuery.data ?? []).map(toUiReply);
   const loading = repliesQuery.isLoading;
   const loadFailed = repliesQuery.isError;
+  const unreadRepliesQ = trpc.notifications.unreadReplies.useQuery(
+    { postId },
+    {
+      enabled: isAuthenticated,
+      retry: 2,
+      refetchOnWindowFocus: false,
+    },
+  );
+  // The server is authoritative and covers profile/direct post visits too.
+  // Route state is only an immediate fallback while this request is loading.
+  const unreadReplies = unreadRepliesQ.data ?? initialUnreadReplies;
 
   // Per-comment notification mute — the viewer's muted reply ids live in
   // their profile's notification preferences.
@@ -334,6 +362,19 @@ export default function CommentSection({
   });
   const deleteMutation = trpc.reply.delete.useMutation({ onSuccess: invalidate, onError: onMutationError });
   const hugMutation = trpc.reply.toggleHug.useMutation({ onSuccess: invalidate, onError: onMutationError });
+  const markReplyReadMut = trpc.notifications.markRead.useMutation({
+    onMutate: () => {
+      // Keep the sidebar and topbar counts in sync with the viewed comment
+      // immediately instead of waiting for the server round-trip.
+      utils.notifications.unreadCount.setData(undefined, (current) =>
+        Math.max(0, (current ?? 1) - 1),
+      );
+    },
+    onSuccess: () => {
+      utils.notifications.list.invalidate();
+      utils.notifications.unreadCount.invalidate();
+    },
+  });
 
   const [collapsedIds, setCollapsedIds] = useState<number[]>([]);
   const [visibleCounts, setVisibleCounts] = useState<Record<string, number>>({});
@@ -350,17 +391,96 @@ export default function CommentSection({
   const editFileRef = useRef<HTMLInputElement>(null);
   const editTextRef = useRef<HTMLTextAreaElement>(null);
   const [reportFor, setReportFor] = useState<Reply | null>(null);
+  const [blockFor, setBlockFor] = useState<Reply | null>(null);
   const [deleteFor, setDeleteFor] = useState<Reply | null>(null);
   const [safetyFor, setSafetyFor] = useState<Reply | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuListRef = useRef<HTMLDivElement>(null);
   const sectionRef = useRef<HTMLDivElement>(null);
   const [highlightReplyId, setHighlightReplyId] = useState<number | null>(null);
+  const [unreadByReply, setUnreadByReply] = useState<Record<number, number[]>>({});
+  const [seenAt, setSeenAt] = useState<Record<number, number>>({});
+  const viewedRepliesRef = useRef(new Set<number>());
+  const seenTimersRef = useRef<Record<number, number>>({});
+
+  // Only replies attached to unread notifications get markers. Opening a new
+  // notification replaces the carried set, while a comment's read state is
+  // cleared below only after it is actually viewed or interacted with.
+  useEffect(() => {
+    const next: Record<number, number[]> = {};
+    for (const item of unreadReplies ?? []) {
+      next[item.replyId] = [...(next[item.replyId] ?? []), item.notificationId];
+    }
+    viewedRepliesRef.current.clear();
+    for (const timer of Object.values(seenTimersRef.current)) window.clearTimeout(timer);
+    seenTimersRef.current = {};
+    setUnreadByReply(next);
+    setSeenAt({});
+  }, [postId, unreadReplies]);
+
+  useEffect(
+    () => () => {
+      for (const timer of Object.values(seenTimersRef.current)) window.clearTimeout(timer);
+    },
+    [],
+  );
+
+  const markReplyViewed = (replyId: number) => {
+    const notificationIds = unreadByReply[replyId];
+    if (!notificationIds?.length || viewedRepliesRef.current.has(replyId)) return;
+    viewedRepliesRef.current.add(replyId);
+    // The notification is read now, but leave the visual marker in place long
+    // enough for the viewer to register which comment they just viewed.
+    seenTimersRef.current[replyId] = window.setTimeout(() => {
+      setSeenAt((current) => ({ ...current, [replyId]: Date.now() }));
+      delete seenTimersRef.current[replyId];
+    }, 1500);
+    for (const notificationId of notificationIds) {
+      markReplyReadMut.mutate({ id: notificationId });
+    }
+  };
+
+  // A reply counts as viewed when it enters the central part of the viewport.
+  // This also covers unread replies the viewer scrolls to after arriving for a
+  // different comment, not just the notification's original focus target.
+  useEffect(() => {
+    const unreadIds = Object.keys(unreadByReply)
+      .map(Number)
+      .filter((id) => !viewedRepliesRef.current.has(id));
+    if (!unreadIds.length || typeof IntersectionObserver === 'undefined') return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          const replyId = Number((entry.target as HTMLElement).dataset.replyId);
+          if (replyId) {
+            markReplyViewed(replyId);
+            observer.unobserve(entry.target);
+          }
+        }
+      },
+      { threshold: 0.25, rootMargin: '-15% 0px -15% 0px' },
+    );
+
+    for (const replyId of unreadIds) {
+      const element = document.getElementById(`reply-${replyId}`);
+      if (element) observer.observe(element);
+    }
+    return () => observer.disconnect();
+    // markReplyViewed intentionally uses the latest unread set for this render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [unreadByReply, repliesQuery.data, visibleCounts, collapsedIds]);
 
   // A notification pointed at a specific reply: reveal it (uncollapse
   // ancestors, raise paging limits along its chain), then scroll + highlight.
   // Runs once per focus target — later refetches must not yank the scroll.
   const revealedForRef = useRef<number | null>(null);
+  // Each notification deep-link is a new target. Reset the previous reveal
+  // before focusing it, otherwise later clicks reuse the first reply's state.
+  useEffect(() => {
+    revealedForRef.current = null;
+  }, [focusReplyId]);
   useEffect(() => {
     if (!focusReplyId || repliesQuery.isLoading) return;
     if (revealedForRef.current === focusReplyId) return;
@@ -525,6 +645,8 @@ export default function CommentSection({
     onSuccess: () => {
       utils.blocks.list.invalidate();
       utils.messages.conversations.invalidate();
+      utils.reply.list.invalidate();
+      utils.post.list.invalidate();
     },
     onError: () => toast('Could not block this member — please try again.'),
   });
@@ -536,8 +658,8 @@ export default function CommentSection({
       toast('Could not block this member — please try again.');
       return;
     }
-    blockMutation.mutate({ userId: reply.authorId });
-    toast(`You've blocked ${reply.author}. They can no longer see or message you.`);
+    // Match the post menu: ask for confirmation before mutating anything.
+    setBlockFor(reply);
   };
 
   const submitReport = (category: ReportCategory, note: string) => {
@@ -627,14 +749,32 @@ export default function CommentSection({
       reply.hugs + (huggedView === (reply.hugged ?? false) ? 0 : huggedView ? 1 : -1);
 
     return (
-      <div key={reply.id} id={`reply-${reply.id}`} className={cn('scroll-mt-24 rounded-xl', depth > 0 && 'mt-2.5')}>
+      <div
+        key={reply.id}
+        id={`reply-${reply.id}`}
+        data-reply-id={reply.id}
+        onPointerDown={() => markReplyViewed(reply.id)}
+        onFocus={() => markReplyViewed(reply.id)}
+        className={cn('relative scroll-mt-24 rounded-xl', depth > 0 && 'mt-2.5')}
+      >
+        {Boolean(unreadByReply[reply.id]?.length) && (
+          <span
+            aria-label="Unread reply"
+            className={cn(
+              'absolute -right-1 -top-1 z-10 h-2.5 w-2.5 rounded-full bg-[#E5484D] ring-2 ring-white transition-all duration-500 ease-out',
+              seenAt[reply.id] ? 'scale-50 opacity-0' : 'scale-100 opacity-100',
+            )}
+          />
+        )}
         <div className="flex items-start gap-2.5">
           {(() => {
             const profilePath = reply.own
               ? '/profile'
-              : reply.authorUsername
-                ? `/u/${reply.authorUsername}`
-                : null;
+              : reply.authorId != null
+                ? `/u/id/${reply.authorId}`
+                : reply.authorUsername
+                  ? `/u/${reply.authorUsername}`
+                  : null;
             const goProfile = profilePath ? () => navigate(profilePath) : undefined;
             return (
               <span
@@ -661,7 +801,7 @@ export default function CommentSection({
             ) : (
               <div
                 className={cn(
-                  'rounded-xl rounded-tl-md bg-[#F6F5F2] px-3.5 py-2.5 ring-1 transition-all duration-500 ease-out hover:shadow-card',
+                  'rounded-xl rounded-tl-md bg-[#FFFFFF] px-3.5 py-2.5 ring-1 transition-all duration-500 ease-out hover:shadow-card',
                   highlightReplyId === reply.id
                     ? 'bg-haven-primary-soft/70 shadow-card ring-2 ring-haven-primary/35'
                     : 'ring-haven-border/70',
@@ -670,20 +810,22 @@ export default function CommentSection({
                 <div className="flex items-start gap-2">
                   <p className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 text-[13px]">
                     <span
-                      role={reply.own || reply.authorUsername ? 'link' : undefined}
-                      tabIndex={reply.own || reply.authorUsername ? 0 : undefined}
+                      role={reply.own || reply.authorId != null || reply.authorUsername ? 'link' : undefined}
+                      tabIndex={reply.own || reply.authorId != null || reply.authorUsername ? 0 : undefined}
                       onClick={() => {
                         if (reply.own) navigate('/profile');
+                        else if (reply.authorId != null) navigate(`/u/id/${reply.authorId}`);
                         else if (reply.authorUsername) navigate(`/u/${reply.authorUsername}`);
                       }}
                       onKeyDown={(e) => {
                         if (e.key !== 'Enter') return;
                         if (reply.own) navigate('/profile');
+                        else if (reply.authorId != null) navigate(`/u/id/${reply.authorId}`);
                         else if (reply.authorUsername) navigate(`/u/${reply.authorUsername}`);
                       }}
                       className={cn(
                         'font-semibold text-haven-text',
-                        (reply.own || reply.authorUsername) &&
+                        (reply.own || reply.authorId != null || reply.authorUsername) &&
                           'cursor-pointer hover:text-haven-primary hover:underline',
                       )}
                     >
@@ -1029,7 +1171,7 @@ export default function CommentSection({
           {/* Capped, scrollable reply list — the post card stops growing */}
           <div
             ref={listRef}
-            className="max-h-[420px] space-y-3 overflow-y-auto pr-1"
+            className="max-h-[420px] space-y-3 overflow-y-auto pr-1 pt-3"
           >
             {shownTop.map((r) => renderNode(r, 0))}
           </div>
@@ -1068,6 +1210,31 @@ export default function CommentSection({
       )}
 
       <AnimatePresence>
+        {/* Block confirmation — same deliberate flow as post cards */}
+        <BlockConfirmDialog
+          open={blockFor !== null}
+          author={blockFor?.author ?? 'this member'}
+          pending={blockMutation.isPending}
+          onClose={() => setBlockFor(null)}
+          onBlock={() => {
+            if (!blockFor || blockFor.authorId == null) return;
+            blockMutation.mutate(
+              { userId: blockFor.authorId },
+              {
+                onSuccess: () => {
+                  setBlockFor(null);
+                  toast(`You've blocked ${blockFor.author}. They can no longer see or message you.`);
+                },
+              },
+            );
+          }}
+          onReport={() => {
+            const reply = blockFor;
+            setBlockFor(null);
+            if (reply) setReportFor(reply);
+          }}
+        />
+
         {/* Report */}
         <ReportDialog
           open={reportFor !== null}

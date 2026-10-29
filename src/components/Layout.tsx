@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { Link, Outlet, useLocation } from 'react-router';
-import { AnimatePresence, motion } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { Toaster } from 'sonner';
 import Sidebar from '@/components/Sidebar';
 import Topbar from '@/components/Topbar';
@@ -87,18 +87,17 @@ export default function Layout() {
           <Topbar onMenuOpen={() => setNavOpen(true)} />
           <div className="flex flex-1 items-start">
             <main className="flex-1 px-4 py-6 sm:py-8 sm:pl-8 sm:pr-4">
-              <AnimatePresence mode="wait" initial={false}>
-                <motion.div
-                  key={location.pathname}
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -8 }}
-                  transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
-                >
-                  <Outlet />
-                </motion.div>
-              </AnimatePresence>
+              <motion.div
+                key={location.pathname}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
+              >
+                <Outlet />
+              </motion.div>
             </main>
+            {location.pathname !== '/moderation' &&
+              (location.state as { from?: string } | null)?.from !== '/moderation' && (
             <aside className="sticky top-[73px] hidden max-h-[calc(100dvh-73px)] w-80 shrink-0 self-start overflow-hidden pb-8 pl-2 pr-6 pt-4 xl:block">
               <h2 className="mb-4 font-serif text-[22px] font-medium text-haven-text">
                 This might help
@@ -133,6 +132,7 @@ export default function Layout() {
                 ))}
               </div>
             </aside>
+            )}
           </div>
         </div>
 

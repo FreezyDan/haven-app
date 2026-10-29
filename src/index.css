@@ -58,6 +58,15 @@
 }
 
 @layer utilities {
+  .notification-card {
+    outline: 2px solid transparent;
+    outline-offset: 0;
+    transition: outline-color 180ms ease-out;
+  }
+  .notification-card:hover {
+    outline-color: #a5a3f5;
+  }
+
   .scrollbar-calm {
     scrollbar-width: thin;
     scrollbar-color: #c9c9e8 transparent;
@@ -98,6 +107,7 @@
   from { opacity: 0; transform: translateY(-4px); }
   to { opacity: 1; transform: translateY(0); }
 }
+
 @media (prefers-reduced-motion: reduce) {
   .bell-pulse {
     animation: none;

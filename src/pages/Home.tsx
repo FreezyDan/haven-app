@@ -139,6 +139,7 @@ export default function Home() {
         ? { supportPreference: patch.supportPreference ?? null }
         : {}),
       ...('image' in patch ? { image: patch.image ?? null } : {}),
+      ...('commentsDisabled' in patch ? { commentsDisabled: patch.commentsDisabled } : {}),
     });
   };
 
@@ -215,6 +216,7 @@ export default function Home() {
       ...(data.emotions.length ? { emotions: data.emotions } : {}),
       ...(data.supportPreference ? { supportPreference: data.supportPreference } : {}),
       ...(audienceLabels(data.audience).length ? { audience: audienceLabels(data.audience) } : {}),
+      ...(data.commentsDisabled !== undefined ? { commentsDisabled: data.commentsDisabled } : {}),
       ...(data.image ? { image: data.image } : {}),
     });
   };

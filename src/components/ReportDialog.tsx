@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import { X } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -52,11 +53,6 @@ export const REPORT_OPTIONS: { key: ReportCategory; label: string; description: 
     description: 'Knowingly false or harmful claims.',
   },
   {
-    key: 'ip-violation',
-    label: 'Intellectual property violation',
-    description: 'Stolen content or art.',
-  },
-  {
     key: 'other',
     label: 'Other',
     description: 'Something else not listed above.',
@@ -86,6 +82,46 @@ export default function ReportDialog({
   const [selected, setSelected] = useState<ReportCategory | null>(null);
   const [note, setNote] = useState('');
   const noteRef = useRef<HTMLTextAreaElement | null>(null);
+  const overlayRef = useRef<HTMLDivElement | null>(null);
+  const optionsRef = useRef<HTMLDivElement | null>(null);
+  const wheelTargetRef = useRef(0);
+  const wheelFrameRef = useRef<number | null>(null);
+
+  const stopBackdropScroll = () => {
+    if (wheelFrameRef.current !== null) cancelAnimationFrame(wheelFrameRef.current);
+    wheelFrameRef.current = null;
+  };
+
+  const scrollOptionsFromBackdrop = (deltaY: number, deltaMode: number) => {
+    const el = optionsRef.current;
+    if (!el) return;
+    const unit = deltaMode === 1 ? 16 : deltaMode === 2 ? el.clientHeight : 1;
+    if (wheelFrameRef.current === null) wheelTargetRef.current = el.scrollTop;
+    const max = Math.max(0, el.scrollHeight - el.clientHeight);
+    wheelTargetRef.current = Math.max(0, Math.min(max, wheelTargetRef.current + deltaY * unit));
+
+    if (wheelFrameRef.current !== null) return;
+    let previousTime: number | undefined;
+    const glide = (time: number) => {
+      const list = optionsRef.current;
+      if (!list) return stopBackdropScroll();
+      if (previousTime === undefined) previousTime = time;
+      // Clamp long frames so returning to the tab never causes a large jump.
+      const elapsed = Math.min(50, time - previousTime);
+      previousTime = time;
+      const distance = wheelTargetRef.current - list.scrollTop;
+      if (Math.abs(distance) < 0.35) {
+        list.scrollTop = wheelTargetRef.current;
+        return stopBackdropScroll();
+      }
+      // Time-based exponential easing: equally fluid at 60/120/144 Hz and
+      // responsive to new wheel input without the previous per-frame jerk.
+      const easing = 1 - Math.exp(-elapsed / 42);
+      list.scrollTop += distance * easing;
+      wheelFrameRef.current = requestAnimationFrame(glide);
+    };
+    wheelFrameRef.current = requestAnimationFrame(glide);
+  };
 
   // Reset every time the dialog opens for a new target.
   useEffect(() => {
@@ -95,10 +131,45 @@ export default function ReportDialog({
     }
   }, [open]);
 
-  return (
+  // Lock the page behind the modal (including scroll chaining at the ends of
+  // the options list), without shifting the layout when the scrollbar hides.
+  useEffect(() => {
+    if (!open) return;
+    const previousOverflow = document.body.style.overflow;
+    const previousPadding = document.body.style.paddingRight;
+    const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
+    document.body.style.overflow = 'hidden';
+    if (scrollbarWidth > 0) document.body.style.paddingRight = `${scrollbarWidth}px`;
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.body.style.paddingRight = previousPadding;
+    };
+  }, [open]);
+
+  // Use the same glide for wheel input over the options, dialog, or backdrop.
+  // A native non-passive listener is required to suppress the list's default
+  // wheel scrolling (React wheel handlers are passive in modern browsers).
+  useEffect(() => {
+    if (!open) return;
+    const overlay = overlayRef.current;
+    if (!overlay) return;
+    const onWheel = (event: WheelEvent) => {
+      // The optional note keeps its own native textarea scrolling.
+      if ((event.target as HTMLElement | null)?.closest?.('textarea')) return;
+      event.preventDefault();
+      scrollOptionsFromBackdrop(event.deltaY, event.deltaMode);
+    };
+    overlay.addEventListener('wheel', onWheel, { passive: false });
+    return () => overlay.removeEventListener('wheel', onWheel);
+  }, [open]);
+
+  useEffect(() => stopBackdropScroll, [open]);
+
+  return createPortal(
     <AnimatePresence>
       {open && (
         <motion.div
+          ref={overlayRef}
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
@@ -132,9 +203,11 @@ export default function ReportDialog({
 
             {/* Scrollable radio-card list */}
             <div
+              ref={optionsRef}
               role="radiogroup"
               aria-label="Report reason"
-              className="scrollbar-calm mt-4 min-h-0 flex-1 space-y-2 overflow-y-auto pr-1.5"
+              onPointerDown={stopBackdropScroll}
+              className="scrollbar-calm mt-4 min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain pr-1.5"
             >
               {REPORT_OPTIONS.map((opt) => {
                 const active = selected === opt.key;
@@ -144,7 +217,7 @@ export default function ReportDialog({
                       type="button"
                       role="radio"
                       aria-checked={active}
-                      onClick={() => setSelected(opt.key)}
+                      onClick={() => setSelected((current) => (current === opt.key ? null : opt.key))}
                       className={cn(
                         'flex w-full items-start gap-3 rounded-xl border px-4 py-3.5 text-left transition-colors duration-150',
                         active
@@ -223,6 +296,7 @@ export default function ReportDialog({
           </motion.div>
         </motion.div>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body,
   );
 }

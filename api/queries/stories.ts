@@ -45,9 +45,10 @@ export async function reviewStory(
   id: number,
   reviewerId: number,
   status: "approved" | "rejected",
+  note?: string,
 ) {
   await getDb()
     .update(schema.stories)
-    .set({ status, reviewerId, reviewedAt: new Date() })
+    .set({ status, reviewerId, reviewedAt: new Date(), reviewNote: note ?? null })
     .where(eq(schema.stories.id, id));
 }

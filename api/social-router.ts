@@ -6,19 +6,36 @@ import {
   createJournalEntry,
   deleteAccountData,
   deleteNotification,
+  restoreNotification,
+  unmarkRead,
   listMutedActors,
   setActorMuted,
   setPostMuted,
   setReplyMuted,
   deleteJournalEntry,
+  deleteMessages,
+  deleteConversation,
+  editMessage,
+  followUser,
+  unfollowUser,
+  listMutualRequests,
   getPublicProfile,
+  getPublicProfileById,
   isBlockedEitherWay,
   listBlocked,
   listConversations,
   listJournal,
   listMessages,
   listMoodCheckins,
+  setTyping,
+  setArchived,
+  pinMessage,
+  starMessage,
+  forwardMessage,
+  restoreMessages,
+  muteConversation,
   listNotifications,
+  listUnreadReplyNotifications,
   markAllRead,
   markConversationRead,
   markRead,
@@ -32,13 +49,18 @@ import {
   updateJournalEntry,
   upsertMoodCheckin,
 } from "./queries/social";
-import { getProfile, upsertProfile } from "./queries/community";
+import { getProfile, listPublicPosts, listPublicPostsById, upsertProfile } from "./queries/community";
 import { getDb } from "./queries/connection";
 import { eq } from "drizzle-orm";
 import * as schema from "@db/schema";
 
 export const notificationRouter = createRouter({
-  list: authedQuery.query(({ ctx }) => listNotifications(ctx.user.id)),
+  list: authedQuery
+    .input(z.object({ cursor: z.number().int().positive().optional(), limit: z.number().int().min(1).max(50).optional(), sourceId: z.number().int().positive().optional() }).optional())
+    .query(({ ctx, input }) => listNotifications(ctx.user.id, input)),
+  unreadReplies: authedQuery
+    .input(z.object({ postId: z.number().int().positive() }))
+    .query(({ ctx, input }) => listUnreadReplyNotifications(ctx.user.id, input.postId)),
   unreadCount: authedQuery.query(({ ctx }) => unreadCount(ctx.user.id)),
   markRead: authedQuery
     .input(z.object({ id: z.number() }))
@@ -47,9 +69,15 @@ export const notificationRouter = createRouter({
   delete: authedQuery
     .input(z.object({ id: z.number() }))
     .mutation(({ ctx, input }) => deleteNotification(ctx.user.id, input.id)),
+  restore: authedQuery
+    .input(z.object({ id: z.number() }))
+    .mutation(({ ctx, input }) => restoreNotification(ctx.user.id, input.id)),
+  unmarkRead: authedQuery
+    .input(z.object({ ids: z.array(z.number().int().positive()).max(100) }))
+    .mutation(({ ctx, input }) => unmarkRead(ctx.user.id, input.ids)),
   muteActor: authedQuery
-    .input(z.object({ actorId: z.number(), muted: z.boolean() }))
-    .mutation(({ ctx, input }) => setActorMuted(ctx.user.id, input.actorId, input.muted)),
+    .input(z.object({ actorId: z.number(), muted: z.boolean(), duration: z.enum(["1h", "1d", "1w", "always"]).optional() }))
+    .mutation(({ ctx, input }) => setActorMuted(ctx.user.id, input.actorId, input.muted, input.duration)),
   mutePost: authedQuery
     .input(z.object({ postId: z.number(), muted: z.boolean() }))
     .mutation(({ ctx, input }) => setPostMuted(ctx.user.id, input.postId, input.muted)),
@@ -60,21 +88,29 @@ export const notificationRouter = createRouter({
 });
 
 export const messageRouter = createRouter({
-  conversations: authedQuery.query(({ ctx }) => listConversations(ctx.user.id)),
+  conversations: authedQuery
+    .input(z.object({ includeArchived: z.boolean().optional() }).optional())
+    .query(({ ctx, input }) => listConversations(ctx.user.id, input?.includeArchived)),
   messages: authedQuery
-    .input(z.object({ conversationId: z.number() }))
+    .input(
+      z.object({
+        conversationId: z.number().int().positive(),
+        cursor: z.number().int().positive().optional(),
+        limit: z.number().int().min(1).max(100).optional(),
+      }),
+    )
     .query(async ({ ctx, input }) => {
-      const result = await listMessages(input.conversationId, ctx.user.id);
+      const result = await listMessages(input.conversationId, ctx.user.id, input);
       if (!result) throw new TRPCError({ code: "FORBIDDEN" });
       return result;
     }),
   start: authedQuery
-    .input(z.object({ userId: z.number() }))
-    .mutation(({ ctx, input }) => startConversation(ctx.user.id, input.userId)),
+    .input(z.object({ userId: z.number().int().positive(), reason: z.string().trim().max(500).optional() }))
+    .mutation(({ ctx, input }) => startConversation(ctx.user.id, input.userId, input.reason)),
   send: authedQuery
-    .input(z.object({ conversationId: z.number(), body: z.string().min(1).max(2000) }))
+    .input(z.object({ conversationId: z.number(), body: z.string().max(2000).default(""), replyToMessageId: z.number().int().positive().optional(), images: z.array(z.string().max(4_000_000)).max(6).optional() }))
     .mutation(async ({ ctx, input }) => {
-      const r = await sendMessage(input.conversationId, ctx.user.id, input.body);
+      const r = await sendMessage(input.conversationId, ctx.user.id, input.body, input.replyToMessageId, input.images);
       if (!r.ok) throw new TRPCError({ code: "FORBIDDEN", message: r.reason });
       return r;
     }),
@@ -85,6 +121,73 @@ export const messageRouter = createRouter({
       if (!ok) throw new TRPCError({ code: "FORBIDDEN" });
       return { ok };
     }),
+  edit: authedQuery
+    .input(z.object({ messageId: z.number().int().positive(), body: z.string().trim().min(1).max(2000) }))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        return await editMessage(input.messageId, ctx.user.id, input.body);
+      } catch (error) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: error instanceof Error ? error.message : "Message could not be edited",
+        });
+      }
+    }),
+  delete: authedQuery
+    .input(z.object({
+      conversationId: z.number().int().positive(),
+      messageIds: z.array(z.number().int().positive()).min(1).max(100),
+      mode: z.enum(["me", "everyone"]),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        return await deleteMessages(input.conversationId, ctx.user.id, input.messageIds, input.mode);
+      } catch (error) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: error instanceof Error ? error.message : "Messages could not be deleted",
+        });
+      }
+    }),
+  deleteChat: authedQuery
+    .input(z.object({ conversationId: z.number().int().positive() }))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        return await deleteConversation(input.conversationId, ctx.user.id);
+      } catch {
+        throw new TRPCError({ code: "FORBIDDEN" });
+      }
+    }),
+  mute: authedQuery
+    .input(z.object({
+      conversationId: z.number().int().positive(),
+      duration: z.enum(["1h", "8h", "1d", "1w", "always", "off"]),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        return await muteConversation(input.conversationId, ctx.user.id, input.duration);
+      } catch {
+        throw new TRPCError({ code: "FORBIDDEN" });
+      }
+    }),
+  typing: authedQuery
+    .input(z.object({ conversationId: z.number(), typing: z.boolean() }))
+    .mutation(({ ctx, input }) => setTyping(input.conversationId, ctx.user.id, input.typing)),
+  archive: authedQuery
+    .input(z.object({ conversationId: z.number().int().positive(), archived: z.boolean() }))
+    .mutation(({ ctx, input }) => setArchived(input.conversationId, ctx.user.id, input.archived)),
+  pin: authedQuery
+    .input(z.object({ messageId: z.number().int().positive() }))
+    .mutation(({ ctx, input }) => pinMessage(input.messageId, ctx.user.id)),
+  star: authedQuery
+    .input(z.object({ messageId: z.number().int().positive() }))
+    .mutation(({ ctx, input }) => starMessage(input.messageId, ctx.user.id)),
+  forward: authedQuery
+    .input(z.object({ messageId: z.number().int().positive(), targetConversationId: z.number().int().positive() }))
+    .mutation(({ ctx, input }) => forwardMessage(input.messageId, ctx.user.id, input.targetConversationId)),
+  restore: authedQuery
+    .input(z.object({ conversationId: z.number().int().positive(), messageIds: z.array(z.number().int().positive()).min(1).max(100), mode: z.enum(["me", "everyone"]) }))
+    .mutation(({ ctx, input }) => restoreMessages(input.conversationId, ctx.user.id, input.messageIds, input.mode)),
   markRead: authedQuery
     .input(z.object({ conversationId: z.number() }))
     .mutation(({ ctx, input }) => markConversationRead(input.conversationId, ctx.user.id)),
@@ -161,9 +264,25 @@ export const blockRouter = createRouter({
 });
 
 export const profilePublicRouter = createRouter({
+  byId: publicQuery
+    .input(z.object({ id: z.number().int().positive() }))
+    .query(({ ctx, input }) => getPublicProfileById(input.id, ctx.user?.id)),
   byUsername: publicQuery
     .input(z.object({ username: z.string().min(3).max(30) }))
     .query(({ ctx, input }) => getPublicProfile(input.username, ctx.user?.id)),
+  posts: publicQuery
+    .input(z.object({ username: z.string().min(3).max(30) }))
+    .query(({ ctx, input }) => listPublicPosts(input.username, ctx.user?.id)),
+  postsById: publicQuery
+    .input(z.object({ id: z.number().int().positive() }))
+    .query(({ ctx, input }) => listPublicPostsById(input.id, ctx.user?.id)),
+  requests: authedQuery.query(({ ctx }) => listMutualRequests(ctx.user.id)),
+  follow: authedQuery
+    .input(z.object({ userId: z.number().int().positive() }))
+    .mutation(({ ctx, input }) => followUser(ctx.user.id, input.userId)),
+  unfollow: authedQuery
+    .input(z.object({ userId: z.number().int().positive() }))
+    .mutation(({ ctx, input }) => unfollowUser(ctx.user.id, input.userId)),
 });
 
 export const settingsRouter = createRouter({
@@ -172,12 +291,14 @@ export const settingsRouter = createRouter({
     .input(
       z.object({
         isPrivate: z.boolean().optional(),
-        dmPolicy: z.enum(["everyone", "mutuals", "nobody"]).optional(),
+        showUsername: z.boolean().optional(),
+        dmPolicy: z.enum(["everyone", "mutuals", "requests", "nobody"]).optional(),
         notifPrefs: z
           .object({
             replies: z.boolean(),
             reactions: z.boolean(),
             messages: z.boolean(),
+            quietHours: z.object({ start: z.string(), end: z.string() }).optional(),
           })
           .optional(),
         contentFilter: z.boolean().optional(),
@@ -192,6 +313,7 @@ export const settingsRouter = createRouter({
       const db = getDb();
       const set: Record<string, unknown> = {};
       if (input.isPrivate !== undefined) set.isPrivate = input.isPrivate;
+      if (input.showUsername !== undefined) set.showUsername = input.showUsername;
       if (input.dmPolicy !== undefined) set.dmPolicy = input.dmPolicy;
       if (input.notifPrefs !== undefined) set.notifPrefs = input.notifPrefs;
       if (input.contentFilter !== undefined) set.contentFilter = input.contentFilter;

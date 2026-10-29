@@ -1,7 +1,8 @@
 import { and, count, desc, eq, inArray, lt, or, isNull } from "drizzle-orm";
 import * as schema from "@db/schema";
 import { getDb } from "./connection";
-import { createNotification } from "./social";
+import { createNotification, isBlockedEitherWay, isMutual, visibleUsernames } from "./social";
+import { sendModerationEmailToAuthor } from "../lib/moderationEmail";
 
 /* ------------------------------- feed -------------------------------- */
 
@@ -275,13 +276,15 @@ async function enrichPosts(
     mySaves = new Set(ms.map((s) => s.postId));
   }
 
-  // Usernames for profile links — one batch lookup for all authors on the page.
+  // Real usernames are returned only to viewers allowed by the author's
+  // privacy setting; everyone else receives null and uses pseudonyms/id links.
   const authorIds = [...new Set(rows.map((p) => p.authorId))];
-  const authorProfiles = await db
-    .select({ userId: schema.profiles.userId, username: schema.profiles.username })
+  const usernameMap = await visibleUsernames(userId, authorIds);
+  const publicAuthors = await db
+    .select({ userId: schema.profiles.userId, pseudonym: schema.profiles.pseudonym })
     .from(schema.profiles)
     .where(inArray(schema.profiles.userId, authorIds));
-  const usernameMap = new Map(authorProfiles.map((pr) => [pr.userId, pr.username]));
+  const pseudonymMap = new Map(publicAuthors.map((profile) => [profile.userId, profile.pseudonym]));
 
   // Posts the viewer muted — so the UI can offer unmute from the post menu.
   let mutedPosts = new Set<number>();
@@ -296,6 +299,8 @@ async function enrichPosts(
 
   return rows.map((p) => ({
     ...p,
+    // Replace legacy snapshots too; hidden real names must not reach the client.
+    authorName: pseudonymMap.get(p.authorId) ?? "Member",
     authorUsername: usernameMap.get(p.authorId) ?? null,
     hugs: hugMap.get(p.id) ?? 0,
     replies: replyMap.get(p.id) ?? 0,
@@ -336,6 +341,45 @@ export async function getPostById(id: number, userId?: number) {
   return enriched ?? null;
 }
 
+/** Mutual-only profile posts with the same interaction data as the main feed. */
+export async function listPublicPostsById(userId: number, viewerId?: number) {
+  const profile = await getDb().query.profiles.findFirst({
+    where: eq(schema.profiles.userId, userId),
+    columns: { username: true },
+  });
+  if (!profile?.username) return null;
+  return listPublicPosts(profile.username, viewerId);
+}
+
+export async function listPublicPosts(username: string, viewerId?: number) {
+  const db = getDb();
+  const profile = await db.query.profiles.findFirst({
+    where: eq(schema.profiles.username, username.toLowerCase()),
+  });
+  if (
+    !profile ||
+    !viewerId ||
+    (await isBlockedEitherWay(viewerId, profile.userId)) ||
+    !(await isMutual(viewerId, profile.userId))
+  ) {
+    return null;
+  }
+
+  const rows = await db
+    .select()
+    .from(schema.posts)
+    .where(
+      and(
+        eq(schema.posts.authorId, profile.userId),
+        or(isNull(schema.posts.deleted), eq(schema.posts.deleted, false)),
+      ),
+    )
+    .orderBy(desc(schema.posts.createdAt))
+    .limit(50);
+  if (!rows.length) return [];
+  return enrichPosts(rows, viewerId);
+}
+
 export async function createPost(input: {
   authorId: number;
   authorName: string;
@@ -346,6 +390,7 @@ export async function createPost(input: {
   audience?: string[];
   emotions?: string[];
   supportPreference?: "listen" | "advice" | "experience";
+  commentsDisabled?: boolean;
 }) {
   const res = await getDb().insert(schema.posts).values(input);
   const id = Number(res[0].insertId);
@@ -363,6 +408,7 @@ export async function updatePost(
     emotions?: string[];
     supportPreference?: "listen" | "advice" | "experience" | null;
     image?: string | null;
+    commentsDisabled?: boolean;
   },
 ) {
   // Only the author may edit — enforced here, not in the UI.
@@ -376,6 +422,7 @@ export async function updatePost(
         ? { supportPreference: patch.supportPreference }
         : {}),
       ...(patch.image !== undefined ? { image: patch.image } : {}),
+      ...(patch.commentsDisabled !== undefined ? { commentsDisabled: patch.commentsDisabled } : {}),
     })
     .where(and(eq(schema.posts.id, id), eq(schema.posts.authorId, authorId)));
 }
@@ -416,17 +463,19 @@ export async function listReplies(postId: number, userId?: number) {
     myHugs = new Set(mh.map((h) => h.replyId));
   }
 
-  // Usernames for profile links on comment authors.
+  // Apply the same server-side identity privacy to every comment payload.
   const authorIds = [...new Set(rows.map((r) => r.authorId))];
-  const authorProfiles = await db
-    .select({ userId: schema.profiles.userId, username: schema.profiles.username })
+  const usernameMap = await visibleUsernames(userId, authorIds);
+  const publicAuthors = await db
+    .select({ userId: schema.profiles.userId, pseudonym: schema.profiles.pseudonym })
     .from(schema.profiles)
     .where(inArray(schema.profiles.userId, authorIds));
-  const usernameMap = new Map(authorProfiles.map((pr) => [pr.userId, pr.username]));
+  const pseudonymMap = new Map(publicAuthors.map((profile) => [profile.userId, profile.pseudonym]));
 
   return rows.map((r) => ({
     ...r,
     body: r.deleted ? "" : r.body,
+    authorName: pseudonymMap.get(r.authorId) ?? "Member",
     authorUsername: usernameMap.get(r.authorId) ?? null,
     hugs: hugMap.get(r.id) ?? 0,
     hugged: myHugs.has(r.id),
@@ -443,13 +492,14 @@ export async function createReply(input: {
   body: string;
   image?: string;
 }) {
+  const post = await getDb().query.posts.findFirst({
+    where: eq(schema.posts.id, input.postId),
+  });
+  if (post?.commentsDisabled) throw new Error("Comments are disabled for this post");
   const res = await getDb().insert(schema.replies).values(input);
   const id = Number(res[0].insertId);
 
   // Notify the post author (and parent reply author for nested replies).
-  const post = await getDb().query.posts.findFirst({
-    where: eq(schema.posts.id, input.postId),
-  });
   if (post) {
     await createNotification({
       userId: post.authorId,
@@ -514,11 +564,34 @@ export async function togglePostHug(postId: number, userId: number) {
     .limit(1);
   if (existing.length) {
     await db.delete(schema.postHugs).where(eq(schema.postHugs.id, existing[0].id));
+    // Unhugging also removes the actor's hug notification for this post, so
+    // notification bundles reflect current hugs rather than historical events.
+    const post = await db.query.posts.findFirst({ where: eq(schema.posts.id, postId) });
+    if (post) {
+      await db
+        .delete(schema.notifications)
+        .where(
+          and(
+            eq(schema.notifications.userId, post.authorId),
+            eq(schema.notifications.actorId, userId),
+            eq(schema.notifications.type, "hug"),
+            eq(schema.notifications.postId, postId),
+          ),
+        );
+    }
     return { added: false };
   }
   await db.insert(schema.postHugs).values({ postId, userId });
   const post = await db.query.posts.findFirst({ where: eq(schema.posts.id, postId) });
   if (post) {
+    // Avoid notification spam from hug/unhug/rehug cycles: one notification
+    // per user per post per 24 hours, even after an unhug removes the old one.
+    const cooldown = await db
+      .select({ lastNotifiedAt: schema.hugNotificationCooldowns.lastNotifiedAt })
+      .from(schema.hugNotificationCooldowns)
+      .where(and(eq(schema.hugNotificationCooldowns.postId, postId), eq(schema.hugNotificationCooldowns.userId, userId)))
+      .limit(1);
+    const recentlyNotified = cooldown[0] && Date.now() - new Date(cooldown[0].lastNotifiedAt).getTime() < 24 * 60 * 60 * 1000;
     const profile = await db.query.profiles.findFirst({
       where: eq(schema.profiles.userId, userId),
     });
@@ -529,7 +602,13 @@ export async function togglePostHug(postId: number, userId: number) {
       type: "hug",
       postId,
       excerpt: post.title,
+      // A rehug within 24h appears in history as read — no unread badge.
+      readAt: recentlyNotified ? new Date() : undefined,
     });
+    await db
+      .insert(schema.hugNotificationCooldowns)
+      .values({ postId, userId, lastNotifiedAt: new Date() })
+      .onDuplicateKeyUpdate({ set: { lastNotifiedAt: new Date() } });
   }
   return { added: true };
 }
@@ -543,6 +622,21 @@ export async function toggleReplyHug(replyId: number, userId: number) {
     .limit(1);
   if (existing.length) {
     await db.delete(schema.replyHugs).where(eq(schema.replyHugs.id, existing[0].id));
+    const reply = await db.query.replies.findFirst({
+      where: eq(schema.replies.id, replyId),
+    });
+    if (reply) {
+      await db
+        .delete(schema.notifications)
+        .where(
+          and(
+            eq(schema.notifications.userId, reply.authorId),
+            eq(schema.notifications.actorId, userId),
+            eq(schema.notifications.type, "hug"),
+            eq(schema.notifications.replyId, replyId),
+          ),
+        );
+    }
     return { added: false };
   }
   await db.insert(schema.replyHugs).values({ replyId, userId });
@@ -669,7 +763,7 @@ const CATEGORY_PRIORITY: Record<SafetyCategoryInput, "high" | "medium" | "low"> 
 };
 
 export async function fileReport(input: {
-  targetType: "post" | "reply";
+  targetType: "post" | "reply" | "conversation";
   targetId: number;
   targetSnapshot: { author: string; title: string; body: string };
   reporterId: number;
@@ -733,19 +827,27 @@ export async function fileReport(input: {
 export async function listReports(filterStatus?: string) {
   const db = getDb();
   const rows = await db
-    .select()
+    .select({ report: schema.safetyReports, parentPostId: schema.replies.postId })
     .from(schema.safetyReports)
+    .leftJoin(
+      schema.replies,
+      and(
+        eq(schema.safetyReports.targetType, "reply"),
+        eq(schema.safetyReports.targetId, schema.replies.id),
+      ),
+    )
     .where(filterStatus ? eq(schema.safetyReports.status, filterStatus as never) : undefined)
     .orderBy(desc(schema.safetyReports.createdAt))
     .limit(200);
-  const rank = { high: 0, medium: 1, low: 2 } as const;
-  return rows
-    .sort((a, b) => rank[a.priority] - rank[b.priority])
-    .map((r) => ({
-      ...r,
-      // Reporter privacy: moderators never see who filed the report.
-      reporterId: undefined,
-    }));
+  // Every report matters equally — keep the database's newest-first order;
+  // legacy priority values are retained for schema compatibility only.
+  return rows.map(({ report, parentPostId }) => ({
+    ...report,
+    // Lets moderators open a reported reply in its parent post's context.
+    parentPostId,
+    // Reporter privacy: moderators never see who filed the report.
+    reporterId: undefined,
+  }));
 }
 
 export async function listReportEvents(reportIds: number[]) {
@@ -776,16 +878,240 @@ export async function logReportEvent(id: number, actorId: number, action: string
   await getDb().insert(schema.reportEvents).values({ reportId: id, actorId, action });
 }
 
+/* ------------------------ official moderation messages ----------------- */
+
+const MODERATION_UNION_ID = "system:moderation";
+
+/** Lazily create the non-login Haven Moderation system account. */
+async function ensureModerationSystemUser() {
+  const db = getDb();
+  const existing = await db.query.users.findFirst({
+    where: eq(schema.users.unionId, MODERATION_UNION_ID),
+  });
+  if (existing) return existing;
+  try {
+    const inserted = await db.insert(schema.users).values({
+      unionId: MODERATION_UNION_ID,
+      name: "Haven Moderation",
+      role: "admin",
+    });
+    const id = Number(inserted[0].insertId);
+    await db.insert(schema.profiles).values({
+      userId: id,
+      pseudonym: "Haven Moderation",
+      displayName: "Haven Moderation",
+      username: "haven-moderation",
+      avatarColor: "#6E6CF0",
+      isPrivate: true,
+      dmPolicy: "nobody",
+      profileComplete: true,
+    });
+    const created = await db.query.users.findFirst({ where: eq(schema.users.id, id) });
+    if (!created) throw new Error("Could not create Haven Moderation");
+    return created;
+  } catch {
+    // Concurrent first sends may race the unique unionId — reuse the winner.
+    const raced = await db.query.users.findFirst({
+      where: eq(schema.users.unionId, MODERATION_UNION_ID),
+    });
+    if (!raced) throw new Error("Could not initialize Haven Moderation");
+    return raced;
+  }
+}
+
+/** Reuse one official Haven Moderation conversation per member. */
+async function ensureModerationConversation(systemId: number, authorId: number) {
+  const db = getDb();
+  const memberships = await db
+    .select({ conversationId: schema.conversationMembers.conversationId })
+    .from(schema.conversationMembers)
+    .where(eq(schema.conversationMembers.userId, systemId));
+  if (memberships.length) {
+    const shared = await db
+      .select({ conversationId: schema.conversationMembers.conversationId })
+      .from(schema.conversationMembers)
+      .where(
+        and(
+          eq(schema.conversationMembers.userId, authorId),
+          inArray(
+            schema.conversationMembers.conversationId,
+            memberships.map((m) => m.conversationId),
+          ),
+        ),
+      )
+      .limit(1);
+    if (shared[0]) return shared[0].conversationId;
+  }
+  const inserted = await db.insert(schema.conversations).values({
+    status: "accepted",
+    createdById: systemId,
+  });
+  const conversationId = Number(inserted[0].insertId);
+  await db.insert(schema.conversationMembers).values([
+    { conversationId, userId: systemId },
+    { conversationId, userId: authorId },
+  ]);
+  return conversationId;
+}
+
+/** Mirror an official message into the member's normal Chats inbox. */
+export async function syncModerationMessageToChat(messageId: number) {
+  const db = getDb();
+  const stored = await db.query.moderationMessages.findFirst({
+    where: eq(schema.moderationMessages.id, messageId),
+  });
+  if (!stored) throw new Error("Moderation message not found");
+  const systemUser = await ensureModerationSystemUser();
+  const conversationId = await ensureModerationConversation(systemUser.id, stored.authorId);
+  const duplicate = await db
+    .select({ id: schema.messages.id })
+    .from(schema.messages)
+    .where(
+      and(
+        eq(schema.messages.conversationId, conversationId),
+        eq(schema.messages.senderId, systemUser.id),
+        eq(schema.messages.body, stored.body),
+        eq(schema.messages.createdAt, stored.createdAt),
+      ),
+    )
+    .limit(1);
+  if (!duplicate.length) {
+    await db.insert(schema.messages).values({
+      conversationId,
+      senderId: systemUser.id,
+      body: stored.body,
+      createdAt: stored.createdAt,
+    });
+  }
+  await db
+    .update(schema.conversationMembers)
+    .set({ lastReadAt: stored.createdAt })
+    .where(
+      and(
+        eq(schema.conversationMembers.conversationId, conversationId),
+        eq(schema.conversationMembers.userId, systemUser.id),
+      ),
+    );
+}
+
+/** Admin-only: deliver an official message without exposing the moderator. */
+export async function sendModerationMessage(
+  reportId: number,
+  moderatorId: number,
+  body: string,
+) {
+  const db = getDb();
+  const report = await db.query.safetyReports.findFirst({
+    where: eq(schema.safetyReports.id, reportId),
+  });
+  if (!report) throw new Error("Report not found");
+
+  let authorId: number | undefined;
+  let parentPostId: number | null = null;
+  if (report.targetType === "post") {
+    const post = await db.query.posts.findFirst({ where: eq(schema.posts.id, report.targetId) });
+    authorId = post?.authorId;
+    parentPostId = post?.id ?? null;
+  } else if (report.targetType === "reply") {
+    const reply = await db.query.replies.findFirst({ where: eq(schema.replies.id, report.targetId) });
+    authorId = reply?.authorId;
+    parentPostId = reply?.postId ?? null;
+  } else {
+    const members = await db
+      .select({ userId: schema.conversationMembers.userId })
+      .from(schema.conversationMembers)
+      .where(eq(schema.conversationMembers.conversationId, report.targetId));
+    // A conversation report is about the other member, not the reporter.
+    authorId = members.find((m) => m.userId !== report.reporterId)?.userId;
+  }
+  if (!authorId) throw new Error("The report author could not be found");
+
+  const systemUser = await ensureModerationSystemUser();
+  const inserted = await db.insert(schema.moderationMessages).values({
+    reportId,
+    authorId,
+    moderatorId,
+    body,
+  });
+  const messageId = Number(inserted[0].insertId);
+  await syncModerationMessageToChat(messageId);
+
+  // Official moderation notices are always delivered, independent of DM prefs.
+  await db.insert(schema.notifications).values({
+    userId: authorId,
+    actorId: systemUser.id,
+    actorName: "Haven Moderation",
+    type: "message",
+    postId: parentPostId,
+    replyId: report.targetType === "reply" ? report.targetId : null,
+    excerpt: body.slice(0, 240),
+  });
+  await logReportEvent(reportId, moderatorId, "Moderator contacted the author via Haven Moderation");
+  const email = await sendModerationEmailToAuthor(authorId, body);
+  return { id: messageId, emailSent: email.sent, emailReason: email.reason };
+}
+
+/** Member-facing official inbox — moderator identity is never selected. */
+export async function listModerationMessages(userId: number) {
+  const rows = await getDb()
+    .select({
+      message: schema.moderationMessages,
+      targetType: schema.safetyReports.targetType,
+      targetId: schema.safetyReports.targetId,
+      targetSnapshot: schema.safetyReports.targetSnapshot,
+      parentPostId: schema.replies.postId,
+    })
+    .from(schema.moderationMessages)
+    .innerJoin(
+      schema.safetyReports,
+      eq(schema.safetyReports.id, schema.moderationMessages.reportId),
+    )
+    .leftJoin(
+      schema.replies,
+      and(
+        eq(schema.safetyReports.targetType, "reply"),
+        eq(schema.safetyReports.targetId, schema.replies.id),
+      ),
+    )
+    .where(eq(schema.moderationMessages.authorId, userId))
+    .orderBy(desc(schema.moderationMessages.createdAt))
+    .limit(100);
+  return rows.map(({ message, ...report }) => ({
+    id: message.id,
+    reportId: message.reportId,
+    body: message.body,
+    createdAt: message.createdAt,
+    readAt: message.readAt,
+    ...report,
+  }));
+}
+
+export async function markModerationMessagesRead(userId: number) {
+  await getDb()
+    .update(schema.moderationMessages)
+    .set({ readAt: new Date() })
+    .where(
+      and(
+        eq(schema.moderationMessages.authorId, userId),
+        isNull(schema.moderationMessages.readAt),
+      ),
+    );
+}
+
 /* ------------------------------ profiles ----------------------------- */
 
 export async function getProfile(userId: number) {
   const rows = await getDb()
-    .select()
+    .select({ profile: schema.profiles, role: schema.users.role })
     .from(schema.profiles)
+    .innerJoin(schema.users, eq(schema.users.id, schema.profiles.userId))
     .where(eq(schema.profiles.userId, userId))
     .limit(1);
+  const row = rows.at(0);
   // React Query v5 rejects `undefined` query data — must be null.
-  return rows.at(0) ?? null;
+  // Include the account role so role-only navigation (Moderation) can be
+  // hidden for normal members; adminQuery remains the security boundary.
+  return row ? { ...row.profile, role: row.role } : null;
 }
 
 export async function upsertProfile(userId: number, pseudonym: string, avatarColor: string) {
@@ -806,7 +1132,7 @@ export type OnboardingInput = {
   avatarUrl?: string;
   interests: string[];
   isPrivate: boolean;
-  dmPolicy: "everyone" | "mutuals" | "nobody";
+  dmPolicy: "everyone" | "mutuals" | "requests" | "nobody";
   notifPrefs: { replies: boolean; reactions: boolean; messages: boolean };
   contentFilter: boolean;
 };

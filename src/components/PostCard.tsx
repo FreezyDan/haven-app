@@ -37,6 +37,8 @@ export interface Post {
   emotions?: string[];
   /** How the poster wants people to respond — optional. */
   supportPreference?: SupportPreference;
+  /** True when the author turned off new comments on this post. */
+  commentsDisabled?: boolean;
   /** Server-side supportive-reaction counts. (Reactions UI removed; kept for API compatibility.) */
   reactions?: Record<string, number>;
   /** Reaction types the current user has selected. */
@@ -64,6 +66,8 @@ interface PostCardProps {
   highlighted?: boolean;
   /** A specific reply to reveal and scroll to (from a notification). */
   focusReplyId?: number;
+  /** Unread reply notifications carried from the notification that opened this post. */
+  unreadReplies?: { replyId: number; notificationId: number }[];
 }
 
 export function readImageFile(file: File, onDone: (dataUrl: string) => void) {
@@ -80,7 +84,7 @@ export function readImageFile(file: File, onDone: (dataUrl: string) => void) {
   reader.readAsDataURL(file);
 }
 
-export default function PostCard({ post, index = 0, onDelete, onUpdate, autoOpenComments = false, highlighted = false, focusReplyId }: PostCardProps) {
+export default function PostCard({ post, index = 0, onDelete, onUpdate, autoOpenComments = false, highlighted = false, focusReplyId, unreadReplies }: PostCardProps) {
   const navigate = useNavigate();
   const { isAuthenticated } = useAuth();
   const utils = trpc.useUtils();
@@ -114,6 +118,8 @@ export default function PostCard({ post, index = 0, onDelete, onUpdate, autoOpen
     onSettled: () => {
       setHuggedLocal(null);
       utils.post.list.invalidate();
+      utils.publicProfile.posts.invalidate();
+      utils.publicProfile.postsById.invalidate();
     },
   });
 
@@ -136,6 +142,9 @@ export default function PostCard({ post, index = 0, onDelete, onUpdate, autoOpen
   const [reportFromBlock, setReportFromBlock] = useState(false);
   const [safetyOpen, setSafetyOpen] = useState(false);
   const [commentsOpen, setCommentsOpen] = useState(autoOpenComments);
+  const [commentsOffLocal, setCommentsOffLocal] = useState<boolean | null>(null);
+  const commentsOff = commentsOffLocal ?? !!post.commentsDisabled;
+  useEffect(() => setCommentsOffLocal(null), [post.commentsDisabled]);
   const [commentsAnimating, setCommentsAnimating] = useState(false);
   const [commentCount, setCommentCount] = useState(post.replies);
   useEffect(() => setCommentCount(post.replies), [post.replies]);
@@ -201,10 +210,12 @@ export default function PostCard({ post, index = 0, onDelete, onUpdate, autoOpen
     onSettled: () => {
       setMutedLocal(null);
       utils.post.list.invalidate();
+      utils.publicProfile.posts.invalidate();
+      utils.publicProfile.postsById.invalidate();
     },
   });
 
-  const menuAction = (action: 'edit' | 'image' | 'report' | 'safety' | 'block' | 'delete' | 'mute') => {
+  const menuAction = (action: 'edit' | 'image' | 'report' | 'safety' | 'block' | 'delete' | 'mute' | 'comments') => {
     setMenuOpen(false);
     if (action === 'mute') {
       if (!isAuthenticated) return needAuth();
@@ -235,6 +246,12 @@ export default function PostCard({ post, index = 0, onDelete, onUpdate, autoOpen
       // the mutation + feedback toast.
       if (!isOwnPost) return;
       onDelete?.(post.id);
+    } else if (action === 'comments') {
+      if (!isOwnPost) return;
+      const next = !commentsOff;
+      setCommentsOffLocal(next);
+      onUpdate?.(post.id, { commentsDisabled: next });
+      toast(next ? 'Comments turned off.' : 'Comments turned on.');
     }
   };
   const [hugBurst, setHugBurst] = useState(0);
@@ -249,6 +266,8 @@ export default function PostCard({ post, index = 0, onDelete, onUpdate, autoOpen
     onSettled: () => {
       setSavedLocal(null);
       utils.post.list.invalidate();
+      utils.publicProfile.posts.invalidate();
+      utils.publicProfile.postsById.invalidate();
     },
   });
   const [expanded, setExpanded] = useState(false);
@@ -365,9 +384,11 @@ export default function PostCard({ post, index = 0, onDelete, onUpdate, autoOpen
         {(() => {
           const profilePath = post.mine
             ? '/profile'
-            : post.authorUsername
-              ? `/u/${post.authorUsername}`
-              : null;
+            : post.authorId != null
+              ? `/u/id/${post.authorId}`
+              : post.authorUsername
+                ? `/u/${post.authorUsername}`
+                : null;
           const goProfile = profilePath
             ? () => navigate(profilePath)
             : undefined;
@@ -441,7 +462,10 @@ export default function PostCard({ post, index = 0, onDelete, onUpdate, autoOpen
                       ? [{ key: 'block' as const, label: 'Block', icon: ShieldBan }]
                       : []),
                     ...(isOwnPost
-                      ? [{ key: 'delete' as const, label: 'Delete', icon: Trash2 }]
+                      ? [
+                          { key: 'comments' as const, label: commentsOff ? 'Turn comments on' : 'Turn comments off', icon: MessageCircle },
+                          { key: 'delete' as const, label: 'Delete', icon: Trash2 },
+                        ]
                       : []),
                     ...(post.dbId != null
                       ? [{
@@ -580,7 +604,7 @@ export default function PostCard({ post, index = 0, onDelete, onUpdate, autoOpen
             return (
               <span
                 key={label}
-                className="flex items-center gap-1.5 rounded-full bg-[#F5F4F2] px-2.5 py-0.5 text-[12px] font-medium text-[#57534E]"
+                className="flex items-center gap-1.5 rounded-full bg-[#FFFFFF] px-2.5 py-0.5 text-[12px] font-medium text-[#57534E]"
               >
                 <span
                   aria-hidden
@@ -595,7 +619,7 @@ export default function PostCard({ post, index = 0, onDelete, onUpdate, autoOpen
             <button
               type="button"
               onClick={() => setShowAllEmotions((s) => !s)}
-              className="rounded-full bg-[#F5F4F2] px-2.5 py-0.5 text-[12px] font-medium text-haven-text-muted transition-colors hover:text-haven-text"
+              className="rounded-full bg-[#FFFFFF] px-2.5 py-0.5 text-[12px] font-medium text-haven-text-muted transition-colors hover:text-haven-text"
               aria-expanded={showAllEmotions}
             >
               {showAllEmotions ? 'Show less' : `+${emotions.length - 3}`}
@@ -625,7 +649,7 @@ export default function PostCard({ post, index = 0, onDelete, onUpdate, autoOpen
       {(pref || canEdit) && (
         <div className="mt-2 flex flex-wrap items-center gap-1.5 pl-2">
           {pref && (
-            <span className="flex items-center gap-1.5 rounded-full bg-[#F5F4F2] px-2.5 py-0.5 text-[12px] font-medium text-[#57534E]">
+            <span className="flex items-center gap-1.5 rounded-full bg-[#FFFFFF] px-2.5 py-0.5 text-[12px] font-medium text-[#57534E]">
               <span aria-hidden>{pref.emoji}</span>
               {pref.label}
             </span>
@@ -695,8 +719,9 @@ export default function PostCard({ post, index = 0, onDelete, onUpdate, autoOpen
         <button
           type="button"
           onClick={toggleHug}
+          disabled={hugMutation.isPending}
           aria-pressed={hugged}
-          className="group relative flex items-center gap-1.5 text-[13px] font-medium text-haven-text-muted transition-colors hover:text-haven-text"
+          className="group relative flex items-center gap-1.5 text-[13px] font-medium text-haven-text-muted transition-colors hover:text-haven-text disabled:cursor-not-allowed disabled:opacity-60"
         >
           <span className="relative">
             <motion.span
@@ -728,18 +753,22 @@ export default function PostCard({ post, index = 0, onDelete, onUpdate, autoOpen
             <>hug</>
           )}
         </button>
-        <button
-          type="button"
-          onClick={() => setCommentsOpen((o) => !o)}
-          aria-expanded={commentsOpen}
-          className={cn(
-            'flex items-center gap-1.5 text-[13px] font-medium transition-colors',
-            commentsOpen ? 'text-haven-text' : 'text-haven-text-muted hover:text-haven-text',
-          )}
-        >
-          <MessageCircle size={18} strokeWidth={1.75} />
-          {commentCount} {commentCount === 1 ? 'reply' : 'replies'}
-        </button>
+        {!commentsOff ? (
+          <button
+            type="button"
+            onClick={() => setCommentsOpen((o) => !o)}
+            aria-expanded={commentsOpen}
+            className={cn(
+              'flex items-center gap-1.5 text-[13px] font-medium transition-colors',
+              commentsOpen ? 'text-haven-text' : 'text-haven-text-muted hover:text-haven-text',
+            )}
+          >
+            <MessageCircle size={18} strokeWidth={1.75} />
+            {commentCount} {commentCount === 1 ? 'reply' : 'replies'}
+          </button>
+        ) : (
+          <span className="text-[13px] font-medium text-haven-text-muted">Comments off</span>
+        )}
         <button
           type="button"
           onClick={toggleSave}
@@ -752,7 +781,7 @@ export default function PostCard({ post, index = 0, onDelete, onUpdate, autoOpen
       </div>
 
       <AnimatePresence initial={false}>
-        {commentsOpen && (
+        {commentsOpen && !commentsOff && (
           <motion.div
             key="comments"
             initial={{ opacity: 0, height: 0 }}
@@ -763,7 +792,7 @@ export default function PostCard({ post, index = 0, onDelete, onUpdate, autoOpen
             className={cn(commentsAnimating ? 'overflow-hidden' : 'overflow-visible')}
           >
             {post.dbId != null && (
-              <CommentSection postId={post.dbId} onCountChange={setCommentCount} focusReplyId={focusReplyId} />
+              <CommentSection postId={post.dbId} onCountChange={setCommentCount} focusReplyId={focusReplyId} unreadReplies={unreadReplies} />
             )}
           </motion.div>
         )}

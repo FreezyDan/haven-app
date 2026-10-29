@@ -1,3 +1,5 @@
+import { useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Flag, ShieldBan, X } from 'lucide-react';
 
@@ -14,6 +16,8 @@ interface BlockConfirmDialogProps {
   onBlock: () => void;
   /** Optional: opens the content-report flow from inside this dialog. */
   onReport?: () => void;
+  /** Wording for the report prompt (defaults to post). */
+  subject?: 'post' | 'chat';
 }
 
 /**
@@ -27,8 +31,24 @@ export default function BlockConfirmDialog({
   onClose,
   onBlock,
   onReport,
+  subject = 'post',
 }: BlockConfirmDialogProps) {
-  return (
+  // This dialog has no scrollable content, so the page behind it must stay
+  // completely still while it is open.
+  useEffect(() => {
+    if (!open) return;
+    const previousOverflow = document.body.style.overflow;
+    const previousPadding = document.body.style.paddingRight;
+    const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
+    document.body.style.overflow = 'hidden';
+    if (scrollbarWidth > 0) document.body.style.paddingRight = `${scrollbarWidth}px`;
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.body.style.paddingRight = previousPadding;
+    };
+  }, [open]);
+
+  return createPortal(
     <AnimatePresence>
       {open && (
         <motion.div
@@ -83,7 +103,7 @@ export default function BlockConfirmDialog({
                 <Flag size={15} strokeWidth={1.75} className="shrink-0 text-haven-text-muted" />
                 <span className="min-w-0">
                   <span className="block text-[14px] font-semibold text-[#292524]">
-                    Something wrong with this post?
+                    Something wrong with this {subject}?
                   </span>
                   <span className="mt-0.5 block text-[13px] leading-snug text-haven-text-muted">
                     You can also report it to our moderators — optionally, before or without blocking.
@@ -116,6 +136,7 @@ export default function BlockConfirmDialog({
           </motion.div>
         </motion.div>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body,
   );
 }

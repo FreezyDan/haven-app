@@ -106,10 +106,12 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
   )
 }
 
-type DmPolicy = 'everyone' | 'mutuals' | 'nobody'
+type DmPolicy = 'everyone' | 'mutuals' | 'requests' | 'nobody'
 
 const DM_OPTIONS: { value: DmPolicy; label: string; hint: string }[] = [
-  { value: 'everyone', label: 'Everyone', hint: 'Any member can request a chat with you.' },
+  { value: 'everyone', label: 'Everyone', hint: 'Anyone can message you directly.' },
+  { value: 'mutuals', label: 'Mutuals', hint: 'Only mutuals can message you directly.' },
+  { value: 'requests', label: 'Requests after Mutuals', hint: 'Anyone can send a chat request. You choose whether to accept it.' },
   { value: 'nobody', label: 'Nobody', hint: 'No one can start a conversation with you.' },
 ]
 
@@ -163,6 +165,7 @@ export default function Settings() {
     replies: boolean
     reactions: boolean
     messages: boolean
+    quietHours?: { start: string; end: string }
   }
 
   const togglePref = (patch: Parameters<typeof updatePrefs.mutate>[0]) => {
@@ -287,6 +290,15 @@ export default function Settings() {
               onToggle={() => togglePref({ isPrivate: !(profile?.isPrivate ?? true) })}
             />
             <div className="border-t border-[#E7E7F0]" />
+            <ToggleRow
+              icon={Lock}
+              label="Show username to mutuals"
+              description="Let only your mutuals see your actual username. It stays hidden from everyone else."
+              on={profile?.showUsername ?? false}
+              busy={updatePrefs.isPending}
+              onToggle={() => togglePref({ showUsername: !(profile?.showUsername ?? false) })}
+            />
+            <div className="border-t border-[#E7E7F0]" />
             <div className="flex items-start justify-between gap-4 py-4">
               <div className="flex gap-3">
                 <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#EAEAFF]">
@@ -377,6 +389,43 @@ export default function Settings() {
           busy={updatePrefs.isPending}
           onToggle={() => togglePref({ notifPrefs: { ...notifPrefs, messages: !notifPrefs.messages } })}
         />
+        <div className="border-t border-[#E7E7F0]" />
+        <ToggleRow
+          icon={Bell}
+          label="Quiet hours"
+          description="Pause notifications during your chosen hours."
+          on={!!notifPrefs.quietHours}
+          busy={updatePrefs.isPending}
+          onToggle={() => {
+            const enabled = !!notifPrefs.quietHours
+            togglePref({
+              notifPrefs: {
+                ...notifPrefs,
+                ...(enabled ? {} : { quietHours: { start: '22:00', end: '08:00' } }),
+              } as typeof notifPrefs,
+            })
+          }}
+        />
+        {notifPrefs.quietHours && (
+          <div className="mt-3 flex items-center gap-2 text-[13px] text-haven-text-muted">
+            <span>From</span>
+            <input
+              type="time"
+              value={notifPrefs.quietHours.start}
+              onChange={(e) => togglePref({ notifPrefs: { ...notifPrefs, quietHours: { ...notifPrefs.quietHours!, start: e.target.value } } })}
+              className={selectClass}
+              aria-label="Quiet hours start"
+            />
+            <span>to</span>
+            <input
+              type="time"
+              value={notifPrefs.quietHours.end}
+              onChange={(e) => togglePref({ notifPrefs: { ...notifPrefs, quietHours: { ...notifPrefs.quietHours!, end: e.target.value } } })}
+              className={selectClass}
+              aria-label="Quiet hours end"
+            />
+          </div>
+        )}
         <p className="mt-3 text-[12px] text-[#6E6E88]">
           These choose which activity creates a notification. Your journal and mood check-ins are always private and never notify anyone.
         </p>
@@ -494,7 +543,7 @@ export default function Settings() {
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
               maxLength={60}
-              className="mt-1.5 w-full rounded-xl border border-[#E7E7F0] bg-[#F7F7FB] px-3 py-2.5 text-sm font-normal text-[#23223A] outline-none focus:ring-2 focus:ring-[#6E6CF0]/40"
+              className="mt-1.5 w-full rounded-xl border border-[#E7E7F0] bg-[#FFFFFF] px-3 py-2.5 text-sm font-normal text-[#23223A] outline-none focus:ring-2 focus:ring-[#6E6CF0]/40"
             />
           </label>
           <div className="mt-5 flex gap-3">
@@ -529,7 +578,7 @@ export default function Settings() {
               value={confirmText}
               onChange={(e) => setConfirmText(e.target.value)}
               disabled={deleting}
-              className="mt-1.5 w-full rounded-xl border border-[#E7E7F0] bg-[#F7F7FB] px-3 py-2.5 text-sm font-normal text-[#23223A] outline-none focus:ring-2 focus:ring-[#A33B32]/40"
+              className="mt-1.5 w-full rounded-xl border border-[#E7E7F0] bg-[#FFFFFF] px-3 py-2.5 text-sm font-normal text-[#23223A] outline-none focus:ring-2 focus:ring-[#A33B32]/40"
               autoComplete="off"
             />
           </label>

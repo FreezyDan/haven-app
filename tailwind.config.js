@@ -45,7 +45,7 @@ module.exports = {
           'primary-hover': '#6E6CF0',
           // Warm neutral — replaces the old lavender wash everywhere.
           'primary-soft': '#F1F0EC',
-          canvas: '#FAF9F7',
+          canvas: '#FFFFFF',
           card: '#FFFFFF',
           border: '#E7E5E4',
           text: '#292524',

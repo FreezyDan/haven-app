@@ -39,7 +39,7 @@ export default function Onboarding() {
   const [interests, setInterests] = useState<string[]>([]);
   // Privacy-protective defaults.
   const [isPrivate, setIsPrivate] = useState(true);
-  const [dmPolicy, setDmPolicy] = useState<"everyone" | "mutuals" | "nobody">("nobody");
+  const [dmPolicy, setDmPolicy] = useState<"everyone" | "mutuals" | "requests" | "nobody">("nobody");
   const [notifPrefs, setNotifPrefs] = useState({
     replies: true,
     reactions: true,
@@ -500,10 +500,11 @@ export default function Onboarding() {
                     <p className="mb-2 text-xs font-medium text-haven-text-muted">
                       Who can send you direct messages?
                     </p>
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                       {[
                         { v: "everyone" as const, label: "Everyone" },
                         { v: "mutuals" as const, label: "Mutuals" },
+                        { v: "requests" as const, label: "Requests after Mutuals" },
                         { v: "nobody" as const, label: "No one" },
                       ].map((o) => (
                         <button

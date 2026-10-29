@@ -15,6 +15,7 @@ export type ApiPost = {
   audience: string[] | null;
   emotions: string[] | null;
   supportPreference: SupportPreference | null;
+  commentsDisabled: boolean;
   deleted: boolean;
   createdAt: Date;
   hugs: number;
@@ -53,6 +54,7 @@ export function toUiPost(p: ApiPost): Post {
     audience: p.audience ?? undefined,
     emotions: p.emotions ?? undefined,
     supportPreference: p.supportPreference ?? undefined,
+    commentsDisabled: p.commentsDisabled,
     reactions: p.reactions,
     myReactions: p.myReactions,
     hugged: p.hugged,

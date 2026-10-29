@@ -61,7 +61,9 @@ export const profiles = mysqlTable(
     communities: json("communities").$type<string[]>(),
     /** Onboarding: privacy & safety (privacy-protective defaults). */
     isPrivate: boolean("isPrivate").notNull().default(true),
-    dmPolicy: mysqlEnum("dmPolicy", ["everyone", "mutuals", "nobody"])
+    /** Allow the actual username to be shown to mutuals (never to non-mutuals). */
+    showUsername: boolean("showUsername").notNull().default(false),
+    dmPolicy: mysqlEnum("dmPolicy", ["everyone", "mutuals", "requests", "nobody"])
       .notNull()
       .default("nobody"),
     notifPrefs: json("notifPrefs").$type<{
@@ -74,6 +76,8 @@ export const profiles = mysqlTable(
       mutedPosts?: number[];
       /** Reply ids the user muted — no notifications about those comments. */
       mutedReplies?: number[];
+      mutedUntil?: Record<string, string>;
+      quietHours?: { start: string; end: string };
     }>(),
     contentFilter: boolean("contentFilter").notNull().default(true),
     /** Free-form UI preferences (hidden homepage cards etc.). */
@@ -117,6 +121,7 @@ export const posts = mysqlTable(
     audience: json("audience").$type<string[]>(),
     emotions: json("emotions").$type<string[]>(),
     supportPreference: mysqlEnum("supportPreference", ["listen", "advice", "experience"]),
+    commentsDisabled: boolean("commentsDisabled").notNull().default(false),
     deleted: boolean("deleted").notNull().default(false),
     createdAt: timestamp("createdAt").defaultNow().notNull(),
   },
@@ -223,6 +228,21 @@ export const replyHugs = mysqlTable(
   (t) => [uniqueIndex("uq_reply_hug").on(t.replyId, t.userId)],
 );
 
+export const hugNotificationCooldowns = mysqlTable(
+  "hug_notification_cooldowns",
+  {
+    id: serial("id").primaryKey(),
+    postId: bigint("postId", { mode: "number", unsigned: true })
+      .notNull()
+      .references(() => posts.id),
+    userId: bigint("userId", { mode: "number", unsigned: true })
+      .notNull()
+      .references(() => users.id),
+    lastNotifiedAt: timestamp("lastNotifiedAt").notNull(),
+  },
+  (t) => [uniqueIndex("uq_hug_cooldown").on(t.postId, t.userId)],
+);
+
 export const savedPosts = mysqlTable(
   "saved_posts",
   {
@@ -242,7 +262,7 @@ export const safetyReports = mysqlTable(
   "safety_reports",
   {
     id: serial("id").primaryKey(),
-    targetType: mysqlEnum("targetType", ["post", "reply"]).notNull(),
+    targetType: mysqlEnum("targetType", ["post", "reply", "conversation"]).notNull(),
     targetId: bigint("targetId", { mode: "number", unsigned: true }).notNull(),
     targetSnapshot: json("targetSnapshot")
       .$type<{ author: string; title: string; body: string }>()
@@ -303,6 +323,29 @@ export const reportEvents = mysqlTable(
   (t) => [index("ix_events_report").on(t.reportId)],
 );
 
+/** Official moderation messages sent to members by Haven Moderation. */
+export const moderationMessages = mysqlTable(
+  "moderation_messages",
+  {
+    id: serial("id").primaryKey(),
+    reportId: bigint("reportId", { mode: "number", unsigned: true })
+      .notNull()
+      .references(() => safetyReports.id),
+    /** Member receiving the message. */
+    authorId: bigint("authorId", { mode: "number", unsigned: true })
+      .notNull()
+      .references(() => users.id),
+    /** Internal audit only — never exposed to the member. */
+    moderatorId: bigint("moderatorId", { mode: "number", unsigned: true })
+      .notNull()
+      .references(() => users.id),
+    body: text("body").notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    readAt: timestamp("readAt"),
+  },
+  (t) => [index("ix_moderation_messages_author").on(t.authorId, t.createdAt)],
+);
+
 
 /* ------------------------------------------------------------------ */
 /* Phase 4–5 tables: notifications, messaging, mood, journal, blocks  */
@@ -322,12 +365,14 @@ export const notifications = mysqlTable(
       .notNull()
       .references(() => users.id),
     actorName: varchar("actorName", { length: 60 }).notNull(),
-    type: mysqlEnum("type", ["reply", "hug", "reaction", "message"]).notNull(),
+    type: mysqlEnum("type", ["reply", "hug", "reaction", "message", "mutual"]).notNull(),
     postId: bigint("postId", { mode: "number", unsigned: true }),
     /** The exact reply a notification refers to, when relevant. */
     replyId: bigint("replyId", { mode: "number", unsigned: true }),
     excerpt: varchar("excerpt", { length: 280 }),
     readAt: timestamp("readAt"),
+    /** Soft delete for undo/archive instead of permanent deletion. */
+    deletedAt: timestamp("deletedAt"),
     createdAt: timestamp("createdAt").defaultNow().notNull(),
   },
   (t) => [index("ix_notifications_user").on(t.userId, t.createdAt)],
@@ -341,6 +386,10 @@ export const conversations = mysqlTable("conversations", {
     .default("pending"),
   /** The member who started the conversation — only the other side can accept/decline. */
   createdById: bigint("createdById", { mode: "number", unsigned: true }),
+  /** Optional note shown with a chat request. */
+  requestReason: text("requestReason"),
+  /** Pending requests expire after seven days. */
+  expiresAt: timestamp("expiresAt"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
@@ -355,6 +404,14 @@ export const conversationMembers = mysqlTable(
       .notNull()
       .references(() => users.id),
     lastReadAt: timestamp("lastReadAt"),
+    /** Per-user Delete chat — hidden only for this member. */
+    deletedAt: timestamp("deletedAt"),
+    /** Per-user mute window; NULL means not muted. */
+    mutedUntil: timestamp("mutedUntil"),
+    lastActiveAt: timestamp("lastActiveAt"),
+    pinnedAt: timestamp("pinnedAt"),
+    typing: boolean("typing").notNull().default(false),
+    archivedAt: timestamp("archivedAt"),
   },
   (t) => [uniqueIndex("uq_member").on(t.conversationId, t.userId)],
 );
@@ -371,8 +428,53 @@ export const messages = mysqlTable(
       .references(() => users.id),
     body: varchar("body", { length: 2000 }).notNull(),
     createdAt: timestamp("createdAt").defaultNow().notNull(),
+    /** Delete for everyone — content becomes a tombstone for all members. */
+    deletedAt: timestamp("deletedAt"),
+    editedAt: timestamp("editedAt"),
+    /** When the other member read this message (read receipt). */
+    readAt: timestamp("readAt"),
+    /** Optional image attachment. */
+    image: mediumtext("image"),
+    /** Optional quoted reply to another message in the same conversation. */
+    replyToMessageId: bigint("replyToMessageId", { mode: "number", unsigned: true }),
+    images: json("images").$type<string[]>(),
+    forwardedFromMessageId: bigint("forwardedFromMessageId", { mode: "number", unsigned: true }),
+    forwardedFromConversationId: bigint("forwardedFromConversationId", { mode: "number", unsigned: true }),
+    pinnedAt: timestamp("pinnedAt"),
   },
   (t) => [index("ix_messages_convo").on(t.conversationId, t.createdAt)],
+);
+
+/** Per-user Delete for me — a message is hidden only for this member. */
+export const messageDeletions = mysqlTable(
+  "message_deletions",
+  {
+    id: serial("id").primaryKey(),
+    messageId: bigint("messageId", { mode: "number", unsigned: true })
+      .notNull()
+      .references(() => messages.id),
+    userId: bigint("userId", { mode: "number", unsigned: true })
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex("uq_message_deletion").on(t.messageId, t.userId)],
+);
+
+/** Per-user starred messages — private to the member who starred them. */
+export const messageStars = mysqlTable(
+  "message_stars",
+  {
+    id: serial("id").primaryKey(),
+    messageId: bigint("messageId", { mode: "number", unsigned: true })
+      .notNull()
+      .references(() => messages.id),
+    userId: bigint("userId", { mode: "number", unsigned: true })
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex("uq_message_star").on(t.messageId, t.userId)],
 );
 
 /** Private by default — never exposed to other users. */
@@ -414,6 +516,21 @@ export const journalEntries = mysqlTable(
   (t) => [index("ix_journal_user").on(t.userId, t.createdAt)],
 );
 
+export const follows = mysqlTable(
+  "follows",
+  {
+    id: serial("id").primaryKey(),
+    followerId: bigint("followerId", { mode: "number", unsigned: true })
+      .notNull()
+      .references(() => users.id),
+    followedId: bigint("followedId", { mode: "number", unsigned: true })
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex("uq_follow").on(t.followerId, t.followedId)],
+);
+
 export const blocks = mysqlTable(
   "blocks",
   {
@@ -449,6 +566,8 @@ export const stories = mysqlTable(
       .default("pending"),
     reviewerId: bigint("reviewerId", { mode: "number", unsigned: true }),
     reviewedAt: timestamp("reviewedAt"),
+    /** Optional moderator reason, especially for a declined submission. */
+    reviewNote: text("reviewNote"),
     createdAt: timestamp("createdAt").defaultNow().notNull(),
   },
   (t) => [index("ix_stories_status").on(t.status, t.createdAt)],

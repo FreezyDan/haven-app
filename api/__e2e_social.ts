@@ -120,13 +120,13 @@ async function main() {
   const notifsSuppressed = await listNotifications(A);
   ok(
     "notifPrefs.messages=false suppresses notification",
-    !notifsSuppressed.some((n) => n.type === "message" && n.excerpt?.includes(TAG)),
+    !notifsSuppressed.items.some((n) => n.type === "message" && n.excerpt?.includes(TAG)),
   );
   // Turn them on and verify the next message notifies.
   await getDb().update(schema.profiles).set({ notifPrefs: notifOn }).where(eq(schema.profiles.userId, A));
   await sendMessage(convoId, B, `${TAG} second`);
   const notifsA = await listNotifications(A);
-  ok("message notification created when enabled", notifsA.some((n) => n.type === "message" && n.excerpt?.includes(`${TAG} second`)));
+  ok("message notification created when enabled", notifsA.items.some((n) => n.type === "message" && n.excerpt?.includes(`${TAG} second`)));
   const msgs = await listMessages(convoId, A);
   ok("messages readable by recipient", !!msgs && msgs.messages.some((m) => m.body.includes(TAG)));
   // Unread badge for A, then mark read

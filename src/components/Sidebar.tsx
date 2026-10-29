@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { NavLink } from 'react-router';
+import { NavLink, useLocation } from 'react-router';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   AlertTriangle,
@@ -25,14 +25,14 @@ import { useHavenUi } from '@/components/Layout';
 const NAV_ITEMS = [
   { to: '/', label: 'Home', icon: Home, end: true },
   { to: '/notifications', label: 'Notifications', icon: Bell, notifBadge: true },
-  { to: '/chats', label: 'Chats', icon: MessageCircle },
+  { to: '/chats', label: 'Chats', icon: MessageCircle, chatBadge: true },
   { to: '/journal', label: 'My Journal', icon: NotebookPen },
   { to: '/mood', label: 'Mood Tracker', icon: CalendarHeart },
   { to: '/blogs', label: 'Blogs', icon: BookOpen },
   { to: '/stories', label: 'Stories', icon: BookHeart },
   { to: '/profile', label: 'Profile', icon: User },
   { to: '/settings', label: 'Settings', icon: Settings },
-  { to: '/moderation', label: 'Moderation', icon: ShieldCheck },
+  { to: '/moderation', label: 'Moderation', icon: ShieldCheck, adminOnly: true },
 ];
 
 export default function Sidebar({ open = false, onClose }: { open?: boolean; onClose?: () => void }) {
@@ -40,12 +40,30 @@ export default function Sidebar({ open = false, onClose }: { open?: boolean; onC
   const [bg, setBg] = useState<BgChoice | null>(loadBg);
   const [bgOpen, setBgOpen] = useState(false);
   const bgInputRef = useRef<HTMLInputElement>(null);
-  // Live unread count for the Notifications badge — same source as the bell.
+  const location = useLocation();
+  // While rows are being read on the Notifications page, background refetches
+  // must not clear the badge before the row dots' shared fade moment.
   const unreadQ = trpc.notifications.unreadCount.useQuery(undefined, {
+    retry: 1,
+    refetchInterval: location.pathname === '/notifications' ? false : 15_000,
+  });
+  const unread = unreadQ.data ?? 0;
+  const conversationsQ = trpc.messages.conversations.useQuery(undefined, {
     retry: 1,
     refetchInterval: 15_000,
   });
-  const unread = unreadQ.data ?? 0;
+  const chatUnread = (conversationsQ.data ?? []).reduce((sum, c) => sum + c.unread, 0);
+  const profileQ = trpc.profile.get.useQuery(undefined, { retry: 1 });
+  const isAdmin = profileQ.data?.role === 'admin';
+  const visibleNavItems = NAV_ITEMS.filter(
+    (item) => !('adminOnly' in item && item.adminOnly) || isAdmin,
+  );
+  const badgeFor = (item: (typeof NAV_ITEMS)[number]) =>
+    'notifBadge' in item && item.notifBadge
+      ? unread
+      : 'chatBadge' in item && item.chatBadge
+        ? chatUnread
+        : 0;
 
   const chooseBg = (choice: BgChoice | null) => {
     setBg(choice);
@@ -94,7 +112,7 @@ export default function Sidebar({ open = false, onClose }: { open?: boolean; onC
 
       {/* Nav */}
       <nav className="flex flex-col gap-0.5" aria-label="Main navigation">
-        {NAV_ITEMS.map((item) => (
+        {visibleNavItems.map((item) => (
           <NavLink key={item.to} to={item.to} end={item.end} onClick={onClose}>
             {({ isActive }) => (
               <span
@@ -112,11 +130,20 @@ export default function Sidebar({ open = false, onClose }: { open?: boolean; onC
                 )}
                 <item.icon size={18} strokeWidth={1.75} className="relative shrink-0" />
                 <span className="relative flex-1">{item.label}</span>
-                {'notifBadge' in item && item.notifBadge && unread > 0 ? (
-                  <span className="relative flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-[#C0453B] px-1 text-[11px] font-medium text-white">
-                    {unread > 99 ? '99+' : unread}
-                  </span>
-                ) : null}
+                <AnimatePresence initial={false}>
+                  {badgeFor(item) > 0 ? (
+                    <motion.span
+                      key={`${item.to}-unread`}
+                      initial={{ opacity: 0, scale: 0.7 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.5 }}
+                      transition={{ duration: 1.2, ease: 'easeOut' }}
+                      className="relative flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-[#C0453B] px-1 text-[11px] font-medium text-white"
+                    >
+                      {badgeFor(item) > 99 ? '99+' : badgeFor(item)}
+                    </motion.span>
+                  ) : null}
+                </AnimatePresence>
               </span>
             )}
           </NavLink>

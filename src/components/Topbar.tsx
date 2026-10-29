@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
+import { AnimatePresence, motion } from 'framer-motion';
 import { Bell, Menu, Search, Sprout } from 'lucide-react';
 import { trpc } from '@/providers/trpc';
 import { useMoodStreak } from '@/lib/moodStore';
@@ -16,7 +17,7 @@ export default function Topbar({ onMenuOpen }: { onMenuOpen?: () => void }) {
   const profile = profileQ.data ?? null;
   const unreadQ = trpc.notifications.unreadCount.useQuery(undefined, {
     retry: 1,
-    refetchInterval: 15_000,
+    refetchInterval: pathname === '/notifications' ? false : 15_000,
   });
   const unread = unreadQ.data ?? 0;
 
@@ -158,7 +159,7 @@ export default function Topbar({ onMenuOpen }: { onMenuOpen?: () => void }) {
                           type="button"
                           onClick={() => {
                             closeSearch();
-                            if (u.username) navigate(`/u/${u.username}`);
+                            navigate(u.username ? `/u/${u.username}` : `/u/id/${u.userId}`);
                           }}
                           className="flex w-full items-center gap-3 px-4 py-2 text-left transition-colors duration-150 ease-out hover:bg-stone-50"
                         >
@@ -169,9 +170,11 @@ export default function Topbar({ onMenuOpen }: { onMenuOpen?: () => void }) {
                             <span className="block truncate text-sm font-medium text-stone-700">
                               {u.pseudonym ?? u.displayName}
                             </span>
-                            <span className="block truncate text-xs text-stone-400">
-                              @{u.username}
-                            </span>
+                            {u.username && (
+                              <span className="block truncate text-xs text-stone-400">
+                                @{u.username}
+                              </span>
+                            )}
                           </span>
                         </button>
                       ))}
@@ -224,11 +227,21 @@ export default function Topbar({ onMenuOpen }: { onMenuOpen?: () => void }) {
           }`}
         >
           <Bell size={20} strokeWidth={1.5} />
-          {unread > 0 && (
-            <span className="absolute -right-0.5 -top-0.5 grid h-4 min-w-4 place-items-center rounded-full bg-haven-primary px-1 text-[10px] font-semibold text-white" style={{ lineHeight: 1 }}>
-              <span className="translate-y-px">{unread > 99 ? '99+' : unread}</span>
-            </span>
-          )}
+          <AnimatePresence initial={false}>
+            {unread > 0 && (
+              <motion.span
+                key="bell-unread"
+                initial={{ opacity: 0, scale: 0.7 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.5 }}
+                transition={{ duration: 1.2, ease: 'easeOut' }}
+                className="absolute -right-0.5 -top-0.5 grid h-4 min-w-4 place-items-center rounded-full bg-haven-primary px-1 text-[10px] font-semibold text-white"
+                style={{ lineHeight: 1 }}
+              >
+                <span className="translate-y-px">{unread > 99 ? '99+' : unread}</span>
+              </motion.span>
+            )}
+          </AnimatePresence>
         </Link>
 
         {/* Avatar + dropdown */}

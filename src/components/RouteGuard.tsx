@@ -14,13 +14,10 @@ function FullScreenSpinner() {
 }
 
 /**
- * Profile load failure screen. Serverless cold starts right after an OAuth
- * redirect can fail the first couple of fetches — retry silently a few times
- * before asking the user to do anything, and always offer a way out.
+ * Non-blocking profile sync notice. Serverless cold starts and new previews
+ * can fail the first few fetches, so retry without replacing the app screen.
  */
 function ProfileLoadError({ message, onRetry }: { message?: string; onRetry: () => void }) {
-  const { logout } = useAuth();
-
   useEffect(() => {
     console.error("[haven] profile.get failed:", message);
     let attempts = 0;
@@ -37,23 +34,19 @@ function ProfileLoadError({ message, onRetry }: { message?: string; onRetry: () 
   }, []);
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-haven-canvas px-4 text-center">
-      <p className="text-sm text-haven-text-muted">
-        We're having trouble loading your profile. This is usually temporary — retrying…
+    <div
+      role="status"
+      className="fixed bottom-4 right-4 z-[100] flex max-w-sm items-center gap-3 rounded-xl border border-haven-border bg-white px-4 py-3 shadow-card-hover"
+    >
+      <p className="text-[13px] text-haven-text-muted">
+        Profile sync is taking longer during startup. Retrying in the background…
       </p>
       <button
         type="button"
         onClick={onRetry}
-        className="rounded-xl bg-haven-primary px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-haven-primary-hover"
+        className="shrink-0 rounded-lg bg-haven-primary px-3 py-1.5 text-[12px] font-semibold text-white transition hover:bg-haven-primary-hover"
       >
         Try again
-      </button>
-      <button
-        type="button"
-        onClick={() => logout()}
-        className="text-[13px] font-medium text-haven-text-muted underline underline-offset-2 hover:text-haven-text"
-      >
-        Sign out and try again
       </button>
     </div>
   );
@@ -90,7 +83,8 @@ export function RequireCompleteProfile({ children }: { children: ReactNode }) {
   const location = useLocation();
   const profileQuery = trpc.profile.get.useQuery(undefined, {
     enabled: isAuthenticated,
-    retry: 2,
+    retry: 4,
+    retryDelay: (attempt) => Math.min(750 * 2 ** attempt, 4000),
     staleTime: 1000 * 30,
   });
 
@@ -106,13 +100,18 @@ export function RequireCompleteProfile({ children }: { children: ReactNode }) {
   if (profileQuery.error?.data?.code === "UNAUTHORIZED") {
     return <SignOutAndRedirect />;
   }
-  // Any other failure (network, DB hiccup) — never treat as "incomplete".
+  // Any other failure (network, DB hiccup, preview cold start) must not blank
+  // the whole app or get mistaken for an incomplete profile. RequireAuth still
+  // protects the route, and every data API continues to enforce authorization.
   if (profileQuery.error) {
     return (
-      <ProfileLoadError
-        message={profileQuery.error.message}
-        onRetry={() => profileQuery.refetch()}
-      />
+      <>
+        {children}
+        <ProfileLoadError
+          message={profileQuery.error.message}
+          onRetry={() => profileQuery.refetch()}
+        />
+      </>
     );
   }
   if (!profileQuery.data?.profileComplete) {
